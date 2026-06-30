@@ -42,6 +42,9 @@ Completed:
 - Provider API Key write path with non-plaintext read responses
 - Unified model CRUD endpoints
 - Unified model candidate CRUD endpoints
+- Frontend Provider create, edit, enable/disable, and delete actions
+- Frontend unified model create, edit, enable/disable, and delete actions
+- Frontend candidate create, edit, enable/disable, and delete actions
 - Provider connection test API
 - Provider model discovery and ProviderModel sync
 - OpenAI Provider adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
@@ -72,8 +75,8 @@ Completed:
 Remaining:
 
 - Expand tests around selector ranking edge cases
-- Add richer edit/delete actions to frontend tables
 - Add Responses streaming conversion
+- Add UI pages for logs, budgets, API tokens, settings, WebDAV, and agents
 
 ## Later milestones
 
