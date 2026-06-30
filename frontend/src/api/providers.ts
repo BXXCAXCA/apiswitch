@@ -1,4 +1,4 @@
-import { getJson, postJson } from './client'
+import { deleteJson, getJson, patchJson, postJson } from './client'
 
 export interface Provider {
   id: number
@@ -22,6 +22,8 @@ export interface ProviderCreate {
   proxy_type?: string | null
   proxy_url?: string | null
 }
+
+export type ProviderUpdate = Partial<ProviderCreate>
 
 export interface ProviderConnectionResult {
   provider_id: number
@@ -59,6 +61,14 @@ export function fetchProviders() {
 
 export function createProvider(payload: ProviderCreate) {
   return postJson<Provider>('/api/admin/providers', payload)
+}
+
+export function updateProvider(providerId: number, payload: ProviderUpdate) {
+  return patchJson<Provider>(`/api/admin/providers/${providerId}`, payload)
+}
+
+export function deleteProvider(providerId: number) {
+  return deleteJson<{ deleted: boolean }>(`/api/admin/providers/${providerId}`)
 }
 
 export function testProvider(providerId: number) {
