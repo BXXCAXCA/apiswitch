@@ -1,10 +1,17 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db
 from apiswitch.db.models import Provider, UnifiedModel, UnifiedModelCandidate
-from apiswitch.schemas.unified_models import UnifiedModelCreate, UnifiedModelRead
+from apiswitch.schemas.unified_models import (
+    UnifiedModelCandidateCreate,
+    UnifiedModelCandidateRead,
+    UnifiedModelCandidateUpdate,
+    UnifiedModelCreate,
+    UnifiedModelRead,
+    UnifiedModelUpdate,
+)
 
 router = APIRouter(prefix="/api/admin/unified-models", tags=["Admin - Unified Models"])
 
@@ -14,6 +21,41 @@ def _capabilities(value: dict | None) -> list[str]:
         return []
     capabilities = value.get("capabilities", [])
     return capabilities if isinstance(capabilities, list) else []
+
+
+def _get_unified_model(db: Session, model_id: int) -> UnifiedModel:
+    model = db.get(UnifiedModel, model_id)
+    if model is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unified model not found")
+    return model
+
+
+def _get_provider(db: Session, provider_id: int) -> Provider:
+    provider = db.get(Provider, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider not found")
+    return provider
+
+
+def _get_candidate(db: Session, candidate_id: int) -> UnifiedModelCandidate:
+    candidate = db.get(UnifiedModelCandidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    return candidate
+
+
+def _candidate_to_read(candidate: UnifiedModelCandidate, provider: Provider) -> UnifiedModelCandidateRead:
+    return UnifiedModelCandidateRead(
+        id=candidate.id,
+        unified_model_id=candidate.unified_model_id,
+        provider_id=provider.id,
+        provider_name=provider.name,
+        provider_type=provider.type,
+        upstream_model=candidate.upstream_model,
+        manual_priority=candidate.manual_priority,
+        enabled=candidate.enabled,
+        capabilities=_capabilities(candidate.capabilities_json),
+    )
 
 
 def _to_read(db: Session, model: UnifiedModel) -> UnifiedModelRead:
@@ -30,14 +72,7 @@ def _to_read(db: Session, model: UnifiedModel) -> UnifiedModelRead:
         enabled=model.enabled,
         capabilities=_capabilities(model.capabilities_json),
         candidates=[
-            {
-                "id": candidate.id,
-                "provider": provider.name,
-                "provider_type": provider.type,
-                "upstream_model": candidate.upstream_model,
-                "priority": candidate.manual_priority,
-                "enabled": candidate.enabled,
-            }
+            _candidate_to_read(candidate, provider).model_dump()
             for candidate, provider in rows
         ],
     )
@@ -64,3 +99,114 @@ async def create_unified_model(
     db.commit()
     db.refresh(model)
     return _to_read(db, model)
+
+
+@router.get("/{model_id}")
+async def get_unified_model(model_id: int, db: Session = Depends(get_db)) -> UnifiedModelRead:
+    return _to_read(db, _get_unified_model(db, model_id))
+
+
+@router.patch("/{model_id}")
+async def update_unified_model(
+    model_id: int,
+    payload: UnifiedModelUpdate,
+    db: Session = Depends(get_db),
+) -> UnifiedModelRead:
+    model = _get_unified_model(db, model_id)
+    data = payload.model_dump(exclude_unset=True)
+    if "capabilities" in data:
+        model.capabilities_json = {"capabilities": data.pop("capabilities")}
+    for key, value in data.items():
+        setattr(model, key, value)
+    db.commit()
+    db.refresh(model)
+    return _to_read(db, model)
+
+
+@router.delete("/{model_id}")
+async def delete_unified_model(model_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    model = _get_unified_model(db, model_id)
+    candidates = db.scalars(
+        select(UnifiedModelCandidate).where(UnifiedModelCandidate.unified_model_id == model_id)
+    ).all()
+    for candidate in candidates:
+        db.delete(candidate)
+    db.delete(model)
+    db.commit()
+    return {"deleted": True}
+
+
+@router.get("/{model_id}/candidates")
+async def list_candidates(
+    model_id: int,
+    db: Session = Depends(get_db),
+) -> list[UnifiedModelCandidateRead]:
+    _get_unified_model(db, model_id)
+    rows = db.execute(
+        select(UnifiedModelCandidate, Provider)
+        .join(Provider, Provider.id == UnifiedModelCandidate.provider_id)
+        .where(UnifiedModelCandidate.unified_model_id == model_id)
+        .order_by(UnifiedModelCandidate.manual_priority.desc())
+    ).all()
+    return [_candidate_to_read(candidate, provider) for candidate, provider in rows]
+
+
+@router.post("/{model_id}/candidates")
+async def create_candidate(
+    model_id: int,
+    payload: UnifiedModelCandidateCreate,
+    db: Session = Depends(get_db),
+) -> UnifiedModelCandidateRead:
+    _get_unified_model(db, model_id)
+    provider = _get_provider(db, payload.provider_id)
+    candidate = UnifiedModelCandidate(
+        unified_model_id=model_id,
+        provider_id=payload.provider_id,
+        upstream_model=payload.upstream_model,
+        manual_priority=payload.manual_priority,
+        enabled=payload.enabled,
+        capabilities_json={"capabilities": payload.capabilities},
+    )
+    db.add(candidate)
+    db.commit()
+    db.refresh(candidate)
+    return _candidate_to_read(candidate, provider)
+
+
+@router.patch("/{model_id}/candidates/{candidate_id}")
+async def update_candidate(
+    model_id: int,
+    candidate_id: int,
+    payload: UnifiedModelCandidateUpdate,
+    db: Session = Depends(get_db),
+) -> UnifiedModelCandidateRead:
+    _get_unified_model(db, model_id)
+    candidate = _get_candidate(db, candidate_id)
+    if candidate.unified_model_id != model_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    data = payload.model_dump(exclude_unset=True)
+    if "provider_id" in data:
+        _get_provider(db, data["provider_id"])
+    if "capabilities" in data:
+        candidate.capabilities_json = {"capabilities": data.pop("capabilities")}
+    for key, value in data.items():
+        setattr(candidate, key, value)
+    db.commit()
+    db.refresh(candidate)
+    provider = _get_provider(db, candidate.provider_id)
+    return _candidate_to_read(candidate, provider)
+
+
+@router.delete("/{model_id}/candidates/{candidate_id}")
+async def delete_candidate(
+    model_id: int,
+    candidate_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    _get_unified_model(db, model_id)
+    candidate = _get_candidate(db, candidate_id)
+    if candidate.unified_model_id != model_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    db.delete(candidate)
+    db.commit()
+    return {"deleted": True}
