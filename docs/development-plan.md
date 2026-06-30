@@ -36,13 +36,17 @@ Completed:
 - Provider CRUD endpoints
 - Unified model CRUD endpoints
 - Unified model candidate CRUD endpoints
+- Provider connection test API
+- Provider model discovery and ProviderModel sync
+- OpenAI-compatible `/models` discovery adapter skeleton
 - Admin logs API backed by SQLite
 - Dashboard summary backed by request logs
 - Admin router health API
 - Frontend router health page connected to backend data
+- Frontend model discovery page connected to backend data
 - Frontend provider creation form
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, candidate CRUD, routed chat completions, and router health
+- Tests for provider CRUD, candidate CRUD, provider discovery, routed chat completions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
@@ -50,7 +54,7 @@ Remaining:
 - Expand tests around selector ranking and provider health updates
 - Add provider health to circuit breaker transition logic
 - Add richer edit/delete actions to frontend tables
-- Add model discovery workflow before real providers
+- Add real OpenAI provider adapter
 
 ## Later milestones
 
