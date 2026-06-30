@@ -69,7 +69,8 @@ The current codebase provides:
 - Gemini response conversion back to OpenAI Chat Completions format
 - Provider API Key write path with non-plaintext read responses
 - Provider connection test and model discovery APIs
-- Router scoring, candidate selector, and circuit-breaker skeleton
+- Router scoring, candidate selector, retry chain, provider health, and persistent circuit breaker state machine
+- Circuit breaker states exposed in Router Health and used to skip unavailable candidates
 - Request log persistence for chat completions, responses, and messages
 - Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
 - Vue 3 + Naive UI admin shell connected to the backend APIs
@@ -95,6 +96,7 @@ curl -X POST http://127.0.0.1:8080/v1/responses `
 curl -X POST http://127.0.0.1:8080/v1/messages `
   -H "Content-Type: application/json" `
   -d '{"model":"code-best","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}'
+curl http://127.0.0.1:8080/api/admin/router-health
 curl -X POST http://127.0.0.1:8080/api/admin/providers/1/test
 curl -X POST http://127.0.0.1:8080/api/admin/providers/1/discover-models
 curl http://127.0.0.1:8080/api/admin/providers/1/models
