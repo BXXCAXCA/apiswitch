@@ -17,6 +17,7 @@ def test_provider_crud(client):
             "name": "mock-extra",
             "type": "mock",
             "base_url": "mock://extra",
+            "api_key": "secret-test-key",
             "enabled": True,
             "timeout_seconds": 90,
         },
@@ -24,6 +25,8 @@ def test_provider_crud(client):
     assert created.status_code == 200
     provider = created.json()
     assert provider["name"] == "mock-extra"
+    assert provider["api_key_configured"] is True
+    assert "secret-test-key" not in str(provider)
 
     updated = client.patch(
         f"/api/admin/providers/{provider['id']}",
@@ -36,6 +39,24 @@ def test_provider_crud(client):
     deleted = client.delete(f"/api/admin/providers/{provider['id']}")
     assert deleted.status_code == 200
     assert deleted.json()["deleted"] is True
+
+
+def test_openai_provider_without_key_reports_connection_failure(client):
+    provider = client.post(
+        "/api/admin/providers",
+        json={
+            "name": "openai-no-key",
+            "type": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "enabled": True,
+            "timeout_seconds": 30,
+        },
+    ).json()
+
+    tested = client.post(f"/api/admin/providers/{provider['id']}/test")
+    assert tested.status_code == 200
+    assert tested.json()["ok"] is False
+    assert "Missing OpenAI API key" in tested.json()["message"]
 
 
 def test_provider_test_and_model_discovery(client):
