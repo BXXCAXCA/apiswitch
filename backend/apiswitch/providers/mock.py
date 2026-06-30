@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from apiswitch.providers.base import ProviderAdapter
-from apiswitch.schemas.gateway import ChatCompletionRequest
+from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
 
 
 class MockProviderAdapter(ProviderAdapter):
@@ -34,6 +34,17 @@ class MockProviderAdapter(ProviderAdapter):
                 "upstream_model": "mock-chat",
                 "retry_chain": [self.name],
             },
+        }
+
+    async def messages(self, request: AnthropicMessagesRequest) -> dict[str, Any]:
+        return {
+            "id": f"msg_mock_{uuid.uuid4().hex[:12]}",
+            "type": "message",
+            "role": "assistant",
+            "model": request.model,
+            "content": [{"type": "text", "text": "Mock response from APISwitch Messages."}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
