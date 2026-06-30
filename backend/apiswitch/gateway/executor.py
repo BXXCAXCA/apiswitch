@@ -4,10 +4,10 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from apiswitch.db.models import RequestLog
+from apiswitch.db.models import Provider, RequestLog
 from apiswitch.gateway.errors import GatewayError, NoAvailableCandidateError
 from apiswitch.providers.base import ProviderError
-from apiswitch.providers.registry import provider_registry
+from apiswitch.providers.factory import build_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import ChatCompletionRequest
@@ -39,8 +39,15 @@ class GatewayExecutor:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
                 try:
-                    provider = provider_registry.get(selected.provider_type)
-                    response = await provider.chat(request)
+                    provider_config = db.get(Provider, selected.provider_id)
+                    if provider_config is None:
+                        raise ProviderError(
+                            f"Provider config not found: {selected.provider_id}",
+                            "provider_not_found",
+                        )
+                    provider = build_provider_adapter(provider_config)
+                    upstream_request = request.model_copy(update={"model": selected.upstream_model})
+                    response = await provider.chat(upstream_request)
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
