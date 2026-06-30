@@ -68,6 +68,10 @@ function handleTypeChange(value: string) {
     form.base_url = 'mock://local'
   } else if (value === 'openai') {
     form.base_url = 'https://api.openai.com/v1'
+  } else if (value === 'anthropic') {
+    form.base_url = 'https://api.anthropic.com/v1'
+  } else if (value === 'gemini') {
+    form.base_url = 'https://generativelanguage.googleapis.com/v1beta'
   } else if (value === 'compatible') {
     form.base_url = 'http://127.0.0.1:3000/v1'
   }
