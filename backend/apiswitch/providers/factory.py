@@ -1,4 +1,5 @@
 from apiswitch.db.models import Provider
+from apiswitch.providers.anthropic import AnthropicProviderAdapter
 from apiswitch.providers.base import ProviderAdapter, ProviderError
 from apiswitch.providers.compatible import CompatibleProviderAdapter
 from apiswitch.providers.mock import MockProviderAdapter
@@ -18,6 +19,12 @@ def build_provider_adapter(provider: Provider) -> ProviderAdapter:
         return MockProviderAdapter()
     if provider.type == "openai":
         return OpenAIProviderAdapter(
+            base_url=provider.base_url,
+            api_key=api_key,
+            timeout_seconds=provider.timeout_seconds,
+        )
+    if provider.type == "anthropic":
+        return AnthropicProviderAdapter(
             base_url=provider.base_url,
             api_key=api_key,
             timeout_seconds=provider.timeout_seconds,
