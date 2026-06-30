@@ -132,4 +132,9 @@ def test_router_health(client):
     assert response.status_code == 200
     body = response.json()
     assert body["total"] >= 1
-    assert body["items"][0]["unified_model"] == "code-best"
+    first = body["items"][0]
+    assert first["unified_model"] == "code-best"
+    assert first["circuit_state"] in {"closed", "open", "half_open"}
+    assert "available" in first
+    assert "failure_threshold" in first
+    assert "cooldown_seconds" in first
