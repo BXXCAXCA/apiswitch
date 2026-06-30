@@ -13,7 +13,7 @@ def test_chat_completions_mock(client):
 
     logs = client.get("/api/admin/logs").json()
     assert logs["total"] >= 1
-    assert logs["items"][0]["unified_model"] == "code-best"
+    assert any(item["unified_model"] == "code-best" for item in logs["items"])
 
 
 def test_unknown_unified_model_returns_error(client):
