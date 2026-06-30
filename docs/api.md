@@ -7,6 +7,8 @@
   - Supports `stream=true` with `text/event-stream` OpenAI-compatible SSE output.
 - `POST /v1/responses`
 - `POST /v1/messages`
+  - Supports non-streaming Anthropic Messages-compatible JSON responses.
+  - Routes unified model names to candidate upstream models through APISwitch.
 - `GET /v1/models`
 
 ## Admin
