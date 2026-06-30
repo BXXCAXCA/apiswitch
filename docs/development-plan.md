@@ -21,7 +21,7 @@ Deliverables:
 
 Status: in progress.
 
-Goal: make OpenAI Chat Completions and Anthropic Messages pass through the real APISwitch routing pipeline while supporting Mock, OpenAI, OpenAI-Compatible, and Anthropic providers.
+Goal: make OpenAI Chat Completions and Anthropic Messages pass through the real APISwitch routing pipeline while supporting Mock, OpenAI, OpenAI-Compatible, Anthropic, and Gemini providers.
 
 Completed:
 
@@ -42,6 +42,8 @@ Completed:
 - OpenAI Provider adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
 - OpenAI-Compatible adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
 - Anthropic Provider adapter for static Claude model discovery and non-streaming `/messages`
+- Gemini Provider adapter for model discovery and OpenAI Chat to Gemini `generateContent` conversion
+- Gemini response conversion back to OpenAI Chat Completions format
 - Mock Provider streaming Chat Completions and Anthropic Messages
 - Gateway streaming execution for `stream=true`
 - Gateway execution for Anthropic Messages
@@ -53,9 +55,9 @@ Completed:
 - Admin router health API
 - Frontend router health page connected to backend data
 - Frontend model discovery page connected to backend data
-- Frontend provider creation form with API Key input
+- Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Anthropic Messages, and router health
+- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Anthropic Messages, Gemini conversion, and router health
 - Isolated pytest SQLite database
 
 Remaining:
@@ -63,14 +65,13 @@ Remaining:
 - Expand tests around selector ranking and provider health updates
 - Add provider health to circuit breaker transition logic
 - Add richer edit/delete actions to frontend tables
-- Add Gemini provider
+- Add Responses protocol conversion
 
 ## Later milestones
 
-1. Gemini provider
-2. Health scoring, retry, circuit breaker
-3. Responses protocol conversion
-4. Full Web UI management
-5. Files, multimodal, embeddings, cache
-6. WebDAV and Agent configuration
-7. Security, packaging, Docker, Windows release
+1. Health scoring, retry, circuit breaker
+2. Responses protocol conversion
+3. Full Web UI management
+4. Files, multimodal, embeddings, cache
+5. WebDAV and Agent configuration
+6. Security, packaging, Docker, Windows release
