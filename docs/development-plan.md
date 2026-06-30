@@ -39,8 +39,11 @@ Completed:
 - Unified model candidate CRUD endpoints
 - Provider connection test API
 - Provider model discovery and ProviderModel sync
-- OpenAI Provider adapter for `/models` and non-streaming `/chat/completions`
-- OpenAI-Compatible adapter for `/models` and non-streaming `/chat/completions`
+- OpenAI Provider adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
+- OpenAI-Compatible adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
+- Mock Provider streaming Chat Completions
+- Gateway streaming execution for `stream=true`
+- SSE model-name rewrite while tracking actual upstream model in APISwitch metadata
 - Gateway execution from database Provider config and candidate upstream model
 - Client response model preservation while tracking actual upstream model in `apiswitch.upstream_model`
 - Admin logs API backed by SQLite
@@ -50,7 +53,7 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, and router health
+- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
@@ -58,15 +61,14 @@ Remaining:
 - Expand tests around selector ranking and provider health updates
 - Add provider health to circuit breaker transition logic
 - Add richer edit/delete actions to frontend tables
-- Add streaming support
+- Add Anthropic and Gemini providers
 
 ## Later milestones
 
 1. Anthropic/Gemini providers
 2. Health scoring, retry, circuit breaker
 3. Responses and Anthropic Messages conversion
-4. Streaming
-5. Full Web UI management
-6. Files, multimodal, embeddings, cache
-7. WebDAV and Agent configuration
-8. Security, packaging, Docker, Windows release
+4. Full Web UI management
+5. Files, multimodal, embeddings, cache
+6. WebDAV and Agent configuration
+7. Security, packaging, Docker, Windows release
