@@ -1,5 +1,7 @@
+import json
 import time
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from apiswitch.providers.base import ProviderAdapter
@@ -33,6 +35,28 @@ class MockProviderAdapter(ProviderAdapter):
                 "retry_chain": [self.name],
             },
         }
+
+    async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
+        stream_id = f"chatcmpl_mock_{uuid.uuid4().hex[:12]}"
+        created = int(time.time())
+        for token in ["Mock", " response", " from", " APISwitch", "."]:
+            chunk = {
+                "id": stream_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": request.model,
+                "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+        final_chunk = {
+            "id": stream_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": request.model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode("utf-8")
+        yield b"data: [DONE]\n\n"
 
     async def list_models(self) -> list[dict[str, Any]]:
         return [
