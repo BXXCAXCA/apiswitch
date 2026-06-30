@@ -6,8 +6,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { NDataTable, NH1, NSpace } from 'naive-ui'
+import { h, onMounted, ref } from 'vue'
+import { NDataTable, NH1, NSpace, NTag } from 'naive-ui'
 import { fetchRouterHealth, type RouterHealthItem } from '../api/routerHealth'
 
 const items = ref<RouterHealthItem[]>([])
@@ -16,11 +16,28 @@ const columns = [
   { title: 'Provider', key: 'provider' },
   { title: '上游模型', key: 'upstream_model' },
   { title: '分数', key: 'score' },
+  {
+    title: '可用',
+    key: 'available',
+    render(row: RouterHealthItem) {
+      return h(NTag, { type: row.available ? 'success' : 'error', size: 'small' }, { default: () => row.available ? '可用' : '不可用' })
+    }
+  },
+  {
+    title: '熔断状态',
+    key: 'circuit_state',
+    render(row: RouterHealthItem) {
+      const tagType = row.circuit_state === 'closed' ? 'success' : row.circuit_state === 'half_open' ? 'warning' : 'error'
+      return h(NTag, { type: tagType, size: 'small' }, { default: () => row.circuit_state })
+    }
+  },
   { title: '成功', key: 'success_count' },
   { title: '失败', key: 'failure_count' },
   { title: '连续失败', key: 'consecutive_failures' },
+  { title: '失败阈值', key: 'failure_threshold' },
+  { title: '冷却秒数', key: 'cooldown_seconds' },
   { title: '平均延迟', key: 'avg_latency_ms' },
-  { title: '熔断状态', key: 'circuit_state' }
+  { title: '最近失败原因', key: 'last_failure_reason' }
 ]
 
 onMounted(async () => {
