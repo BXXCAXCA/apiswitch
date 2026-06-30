@@ -9,11 +9,39 @@
 
 ## Admin
 
+### Dashboard
+
 - `GET /api/admin/dashboard/summary`
+
+### Providers
+
 - `GET /api/admin/providers`
 - `POST /api/admin/providers`
+- `GET /api/admin/providers/{provider_id}`
+- `PATCH /api/admin/providers/{provider_id}`
+- `DELETE /api/admin/providers/{provider_id}`
+
+### Unified Models
+
 - `GET /api/admin/unified-models`
 - `POST /api/admin/unified-models`
+- `GET /api/admin/unified-models/{model_id}`
+- `PATCH /api/admin/unified-models/{model_id}`
+- `DELETE /api/admin/unified-models/{model_id}`
+- `GET /api/admin/unified-models/{model_id}/candidates`
+- `POST /api/admin/unified-models/{model_id}/candidates`
+- `PATCH /api/admin/unified-models/{model_id}/candidates/{candidate_id}`
+- `DELETE /api/admin/unified-models/{model_id}/candidates/{candidate_id}`
+
+### Router Health
+
+- `GET /api/admin/router-health`
+
+### Logs
+
 - `GET /api/admin/logs`
+
+### Settings
+
 - `GET /api/admin/settings`
 - `PATCH /api/admin/settings`
