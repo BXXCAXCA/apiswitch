@@ -59,10 +59,13 @@ The current codebase provides:
 - OpenAI Chat Completions endpoint routed through the unified-model selector
 - OpenAI Responses and Anthropic Messages endpoint skeletons
 - Mock Provider and provider registry
+- Provider connection test and model discovery APIs
+- OpenAI-compatible `/models` discovery adapter skeleton
 - Router scoring, candidate selector, and circuit-breaker skeleton
 - Request log persistence for chat completions
-- Admin APIs backed by SQLite for providers, unified models, logs, dashboard summary, and settings
+- Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
 - Vue 3 + Naive UI admin shell connected to the backend APIs
+- Web UI forms for providers, unified models, candidates, router health, and model discovery
 - Backend pytest and frontend Vitest baseline
 
 The project still intentionally uses a Mock Provider. This validates routing, persistence, UI, and tests before real upstream API integrations are added.
@@ -75,4 +78,7 @@ curl http://127.0.0.1:8080/v1/models
 curl -X POST http://127.0.0.1:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{"model":"code-best","messages":[{"role":"user","content":"hello"}]}'
+curl -X POST http://127.0.0.1:8080/api/admin/providers/1/test
+curl -X POST http://127.0.0.1:8080/api/admin/providers/1/discover-models
+curl http://127.0.0.1:8080/api/admin/providers/1/models
 ```
