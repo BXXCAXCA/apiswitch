@@ -4,9 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from apiswitch import __version__
 from apiswitch.api.admin import dashboard, logs, providers, settings as admin_settings, unified_models
 from apiswitch.api.gateway import chat_completions, messages, models, responses
+from apiswitch.db.bootstrap import init_database
 
 
 def create_app() -> FastAPI:
+    init_database()
+
     app = FastAPI(
         title="APISwitch",
         version=__version__,
