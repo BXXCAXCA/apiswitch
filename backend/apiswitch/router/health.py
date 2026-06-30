@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import ProviderHealth
+from apiswitch.router.circuit_breaker import record_breaker_failure, record_breaker_success
 
 
 def _get_or_create_health(db: Session, candidate_id: int) -> ProviderHealth:
@@ -27,6 +28,7 @@ def record_candidate_success(db: Session, candidate_id: int, latency_ms: float) 
     health.p50_latency_ms = health.avg_latency_ms
     health.p95_latency_ms = max(health.p95_latency_ms or 0, latency_ms)
     health.updated_at = datetime.utcnow()
+    record_breaker_success(db, candidate_id)
 
 
 def record_candidate_failure(db: Session, candidate_id: int, reason: str) -> None:
@@ -36,3 +38,4 @@ def record_candidate_failure(db: Session, candidate_id: int, reason: str) -> Non
     health.last_failure_at = datetime.utcnow()
     health.last_failure_reason = reason
     health.updated_at = datetime.utcnow()
+    record_breaker_failure(db, candidate_id, health.consecutive_failures)
