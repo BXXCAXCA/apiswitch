@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db
@@ -14,8 +15,15 @@ router = APIRouter(prefix="/v1", tags=["Gateway - OpenAI Chat"])
 async def create_chat_completion(
     payload: ChatCompletionRequest,
     db: Session = Depends(get_db),
-) -> dict:
+):
     try:
+        if payload.stream:
+            stream = await gateway_executor.stream_chat_completion(payload, db)
+            return StreamingResponse(
+                stream,
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         return await gateway_executor.execute_chat_completion(payload, db)
     except GatewayError as exc:
         raise HTTPException(
