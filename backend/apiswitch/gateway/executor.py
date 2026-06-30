@@ -73,6 +73,7 @@ class GatewayExecutor:
                     log.output_tokens = usage.get("completion_tokens")
                     db.commit()
 
+                    response["model"] = request.model
                     response.setdefault("apiswitch", {})
                     response["apiswitch"].update(
                         {
