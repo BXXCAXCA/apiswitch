@@ -5,7 +5,11 @@
 - `POST /v1/chat/completions`
   - Supports non-streaming JSON responses.
   - Supports `stream=true` with `text/event-stream` OpenAI-compatible SSE output.
+  - Routes unified model names to candidate upstream models through APISwitch.
 - `POST /v1/responses`
+  - Supports non-streaming OpenAI Responses-compatible JSON responses.
+  - Converts Responses input to Chat Completions internally, then routes through APISwitch.
+  - `stream=true` is currently rejected with `responses_streaming_not_implemented`.
 - `POST /v1/messages`
   - Supports non-streaming Anthropic Messages-compatible JSON responses.
   - Routes unified model names to candidate upstream models through APISwitch.
