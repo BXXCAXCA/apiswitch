@@ -74,7 +74,8 @@ The current codebase provides:
 - Request log persistence for chat completions, responses, and messages
 - Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
 - Vue 3 + Naive UI admin shell connected to the backend APIs
-- Web UI forms for providers, unified models, candidates, router health, and model discovery
+- Web UI management for providers, unified models, candidates, router health, and model discovery
+- Provider, unified model, and candidate create/edit/enable/disable/delete actions
 - Backend pytest and frontend Vitest baseline
 
 The default setup still uses a Mock Provider. Add an OpenAI, OpenAI-Compatible, Anthropic, or Gemini provider in the Web UI, discover models, and attach an upstream model as a candidate to route real traffic.
