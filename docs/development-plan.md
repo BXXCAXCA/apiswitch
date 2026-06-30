@@ -31,6 +31,11 @@ Completed:
 - Request log persistence for `/v1/chat/completions`
 - Provider health updates after candidate success/failure
 - Retry chain across enabled ranked candidates
+- Persistent circuit breaker state machine with `closed`, `open`, and `half_open`
+- Circuit breaker updates from Provider Health success/failure events
+- Candidate selector skips open circuit candidates until cooldown allows half-open probing
+- Router Health API exposes circuit state, availability, thresholds, and cooldown timestamps
+- Frontend Router Health page displays circuit state and availability
 - Admin providers API backed by SQLite
 - Admin unified models API backed by SQLite
 - Provider CRUD endpoints
@@ -61,20 +66,18 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, and router health
+- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
 
-- Expand tests around selector ranking and provider health updates
-- Add provider health to circuit breaker transition logic
+- Expand tests around selector ranking edge cases
 - Add richer edit/delete actions to frontend tables
 - Add Responses streaming conversion
 
 ## Later milestones
 
-1. Health scoring, retry, circuit breaker
-2. Full Web UI management
-3. Files, multimodal, embeddings, cache
-4. WebDAV and Agent configuration
-5. Security, packaging, Docker, Windows release
+1. Full Web UI management
+2. Files, multimodal, embeddings, cache
+3. WebDAV and Agent configuration
+4. Security, packaging, Docker, Windows release
