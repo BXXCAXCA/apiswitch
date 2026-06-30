@@ -1,4 +1,4 @@
-import { getJson, postJson } from './client'
+import { deleteJson, getJson, patchJson, postJson } from './client'
 
 export interface UnifiedModelCandidate {
   id: number
@@ -28,6 +28,8 @@ export interface UnifiedModelCreate {
   capabilities: string[]
 }
 
+export type UnifiedModelUpdate = Partial<UnifiedModelCreate>
+
 export interface UnifiedModelCandidateCreate {
   provider_id: number
   upstream_model: string
@@ -35,6 +37,8 @@ export interface UnifiedModelCandidateCreate {
   enabled: boolean
   capabilities: string[]
 }
+
+export type UnifiedModelCandidateUpdate = Partial<UnifiedModelCandidateCreate>
 
 export function fetchUnifiedModels() {
   return getJson<UnifiedModel[]>('/api/admin/unified-models')
@@ -44,6 +48,22 @@ export function createUnifiedModel(payload: UnifiedModelCreate) {
   return postJson<UnifiedModel>('/api/admin/unified-models', payload)
 }
 
+export function updateUnifiedModel(modelId: number, payload: UnifiedModelUpdate) {
+  return patchJson<UnifiedModel>(`/api/admin/unified-models/${modelId}`, payload)
+}
+
+export function deleteUnifiedModel(modelId: number) {
+  return deleteJson<{ deleted: boolean }>(`/api/admin/unified-models/${modelId}`)
+}
+
 export function createUnifiedModelCandidate(modelId: number, payload: UnifiedModelCandidateCreate) {
   return postJson<UnifiedModelCandidate>(`/api/admin/unified-models/${modelId}/candidates`, payload)
+}
+
+export function updateUnifiedModelCandidate(modelId: number, candidateId: number, payload: UnifiedModelCandidateUpdate) {
+  return patchJson<UnifiedModelCandidate>(`/api/admin/unified-models/${modelId}/candidates/${candidateId}`, payload)
+}
+
+export function deleteUnifiedModelCandidate(modelId: number, candidateId: number) {
+  return deleteJson<{ deleted: boolean }>(`/api/admin/unified-models/${modelId}/candidates/${candidateId}`)
 }
