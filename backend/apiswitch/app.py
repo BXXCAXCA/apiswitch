@@ -2,7 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apiswitch import __version__
-from apiswitch.api.admin import dashboard, logs, providers, settings as admin_settings, unified_models
+from apiswitch.api.admin import (
+    dashboard,
+    logs,
+    providers,
+    router_health,
+    settings as admin_settings,
+    unified_models,
+)
 from apiswitch.api.gateway import chat_completions, messages, models, responses
 from apiswitch.db.bootstrap import init_database
 
@@ -23,6 +30,7 @@ def create_app() -> FastAPI:
             {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
             {"name": "Admin - Providers", "description": "Provider management."},
             {"name": "Admin - Unified Models", "description": "Unified model management."},
+            {"name": "Admin - Router Health", "description": "Candidate scoring and health state."},
             {"name": "Admin - Logs", "description": "Request logs and statistics."},
             {"name": "Admin - Settings", "description": "System settings."},
         ],
@@ -47,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(providers.router)
     app.include_router(unified_models.router)
+    app.include_router(router_health.router)
     app.include_router(logs.router)
     app.include_router(admin_settings.router)
     return app
