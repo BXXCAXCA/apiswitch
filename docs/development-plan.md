@@ -33,17 +33,24 @@ Completed:
 - Retry chain across enabled ranked candidates
 - Admin providers API backed by SQLite
 - Admin unified models API backed by SQLite
+- Provider CRUD endpoints
+- Unified model CRUD endpoints
+- Unified model candidate CRUD endpoints
 - Admin logs API backed by SQLite
 - Dashboard summary backed by request logs
 - Admin router health API
 - Frontend router health page connected to backend data
+- Frontend provider creation form
+- Frontend unified model and candidate creation forms
+- Tests for provider CRUD, candidate CRUD, routed chat completions, and router health
+- Isolated pytest SQLite database
 
 Remaining:
 
-- Add candidate CRUD endpoints
-- Add admin UI forms for provider and unified model creation
 - Expand tests around selector ranking and provider health updates
 - Add provider health to circuit breaker transition logic
+- Add richer edit/delete actions to frontend tables
+- Add model discovery workflow before real providers
 
 ## Later milestones
 
