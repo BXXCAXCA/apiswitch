@@ -20,3 +20,16 @@ def test_chat_completions_streaming_mock(client):
 
     logs = client.get("/api/admin/logs").json()
     assert any(item["inbound_protocol"] == "openai_chat_stream" for item in logs["items"])
+
+
+def test_streaming_unknown_unified_model_returns_error(client):
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "missing-stream-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["type"] == "unified_model_not_found"
