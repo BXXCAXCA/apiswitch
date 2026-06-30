@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from apiswitch.db.models import Provider, ProviderHealth, UnifiedModel, UnifiedModelCandidate
 from apiswitch.gateway.errors import NoAvailableCandidateError, UnifiedModelNotFoundError
+from apiswitch.router.circuit_breaker import is_candidate_allowed
 from apiswitch.router.scoring import CandidateScoreInput, calculate_score
 
 
@@ -43,7 +44,11 @@ def list_ranked_candidates(db: Session, unified_model_name: str) -> list[Selecte
         raise NoAvailableCandidateError(f"No enabled candidates for unified model: {unified_model_name}")
 
     scored: list[SelectedCandidate] = []
+    blocked_count = 0
     for candidate, provider, health in rows:
+        if not is_candidate_allowed(db, candidate.id):
+            blocked_count += 1
+            continue
         success_count = health.success_count if health else 0
         failure_count = health.failure_count if health else 0
         total_count = success_count + failure_count
@@ -70,6 +75,10 @@ def list_ranked_candidates(db: Session, unified_model_name: str) -> list[Selecte
             )
         )
 
+    if not scored:
+        raise NoAvailableCandidateError(
+            f"No available candidates for unified model: {unified_model_name}; {blocked_count} blocked by circuit breaker"
+        )
     return sorted(scored, key=lambda item: item.score, reverse=True)
 
 
