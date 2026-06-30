@@ -6,6 +6,7 @@ from apiswitch.api.deps import get_db
 from apiswitch.db.models import Provider, ProviderModel, UnifiedModelCandidate
 from apiswitch.schemas.model_discovery import ModelDiscoveryResult, ProviderConnectionResult
 from apiswitch.schemas.providers import ProviderCreate, ProviderRead, ProviderUpdate
+from apiswitch.security.crypto import secret_crypto
 from apiswitch.services.model_discovery import safe_test_provider_connection, sync_provider_models
 
 router = APIRouter(prefix="/api/admin/providers", tags=["Admin - Providers"])
@@ -28,7 +29,14 @@ def _to_read(provider: Provider) -> ProviderRead:
         timeout_seconds=provider.timeout_seconds,
         proxy_type=provider.proxy_type,
         proxy_url=provider.proxy_url,
+        api_key_configured=bool(provider.api_key_encrypted),
     )
+
+
+def _encrypt_api_key(api_key: str | None) -> str | None:
+    if api_key is None or api_key == "":
+        return None
+    return secret_crypto.encrypt(api_key)
 
 
 @router.get("")
@@ -43,6 +51,7 @@ async def create_provider(payload: ProviderCreate, db: Session = Depends(get_db)
         name=payload.name,
         type=payload.type,
         base_url=payload.base_url,
+        api_key_encrypted=_encrypt_api_key(payload.api_key),
         enabled=payload.enabled,
         timeout_seconds=payload.timeout_seconds,
         proxy_type=payload.proxy_type,
@@ -66,7 +75,10 @@ async def update_provider(
     db: Session = Depends(get_db),
 ) -> ProviderRead:
     provider = _get_provider(db, provider_id)
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    if "api_key" in data:
+        provider.api_key_encrypted = _encrypt_api_key(data.pop("api_key"))
+    for key, value in data.items():
         setattr(provider, key, value)
     db.commit()
     db.refresh(provider)
