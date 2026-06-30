@@ -38,6 +38,24 @@ def test_provider_crud(client):
     assert deleted.json()["deleted"] is True
 
 
+def test_provider_test_and_model_discovery(client):
+    provider = client.get("/api/admin/providers").json()[0]
+
+    tested = client.post(f"/api/admin/providers/{provider['id']}/test")
+    assert tested.status_code == 200
+    assert tested.json()["ok"] is True
+
+    discovered = client.post(f"/api/admin/providers/{provider['id']}/discover-models")
+    assert discovered.status_code == 200
+    body = discovered.json()
+    assert body["provider_name"] == "mock-main"
+    assert len(body["models"]) >= 1
+
+    provider_models = client.get(f"/api/admin/providers/{provider['id']}/models")
+    assert provider_models.status_code == 200
+    assert any(item["model_name"] == "code-best" for item in provider_models.json())
+
+
 def test_unified_model_and_candidate_crud(client):
     provider = client.post(
         "/api/admin/providers",
