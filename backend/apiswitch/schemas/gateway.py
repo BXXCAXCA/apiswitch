@@ -23,7 +23,13 @@ class ResponsesRequest(BaseModel):
     model: str
     input: Any
     stream: bool = False
+    instructions: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_output_tokens: int | None = None
     tools: list[dict[str, Any]] | None = None
+    tool_choice: Any | None = None
+    previous_response_id: str | None = None
 
 
 class AnthropicMessagesRequest(BaseModel):
