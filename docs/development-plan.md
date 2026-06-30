@@ -2,6 +2,8 @@
 
 ## v0.1.0-skeleton
 
+Status: completed.
+
 Goal: establish a runnable, testable skeleton before real provider integrations.
 
 Deliverables:
@@ -15,14 +17,38 @@ Deliverables:
 - Router scoring and circuit-breaker skeleton
 - Baseline tests
 
+## v0.2.0-core-gateway
+
+Status: in progress.
+
+Goal: make OpenAI Chat Completions pass through the real APISwitch routing pipeline while still using Mock Provider.
+
+Completed:
+
+- Database bootstrap and seed data for `mock-main`, `mock-chat`, and `code-best`
+- Unified-model candidate selector
+- Gateway error types
+- Request log persistence for `/v1/chat/completions`
+- Admin providers API backed by SQLite
+- Admin unified models API backed by SQLite
+- Admin logs API backed by SQLite
+- Dashboard summary backed by request logs
+
+Remaining:
+
+- Persist provider health updates after success/failure
+- Implement retry chain across multiple enabled candidates
+- Add candidate CRUD endpoints
+- Add admin UI forms for provider and unified model creation
+- Expand tests around request log persistence and selector behavior
+
 ## Later milestones
 
-1. Core OpenAI Chat Completions route
-2. Real OpenAI/Anthropic/Gemini providers
-3. Health scoring, retry, circuit breaker
-4. Responses and Anthropic Messages conversion
-5. Streaming
-6. Full Web UI management
-7. Files, multimodal, embeddings, cache
-8. WebDAV and Agent configuration
-9. Security, packaging, Docker, Windows release
+1. Real OpenAI/Anthropic/Gemini providers
+2. Health scoring, retry, circuit breaker
+3. Responses and Anthropic Messages conversion
+4. Streaming
+5. Full Web UI management
+6. Files, multimodal, embeddings, cache
+7. WebDAV and Agent configuration
+8. Security, packaging, Docker, Windows release
