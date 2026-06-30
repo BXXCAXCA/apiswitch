@@ -46,6 +46,8 @@ Completed:
 - Gemini response conversion back to OpenAI Chat Completions format
 - Mock Provider streaming Chat Completions and Anthropic Messages
 - Gateway streaming execution for `stream=true`
+- Streaming candidate fallback before the first SSE chunk is sent
+- Strict-compatible streaming failure handling once SSE output has started
 - Gateway execution for Anthropic Messages
 - SSE model-name rewrite while tracking actual upstream model in APISwitch metadata
 - Gateway execution from database Provider config and candidate upstream model
