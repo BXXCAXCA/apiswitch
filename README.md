@@ -8,7 +8,7 @@ Current milestone: `v0.2.0-core-gateway` in progress.
 
 - Backend: Python 3.11+, FastAPI, SQLAlchemy, Alembic, SQLite
 - Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router, Naive UI
-- Current provider: Mock Provider through the real routing pipeline
+- Current providers: Mock, OpenAI, and OpenAI-Compatible non-streaming Chat Completions
 
 ## Development startup
 
@@ -58,9 +58,11 @@ The current codebase provides:
 - SQLite, SQLAlchemy models, Alembic migration, and development bootstrap seed
 - OpenAI Chat Completions endpoint routed through the unified-model selector
 - OpenAI Responses and Anthropic Messages endpoint skeletons
-- Mock Provider and provider registry
+- Mock Provider adapter
+- OpenAI Provider adapter for model discovery and non-streaming Chat Completions
+- OpenAI-Compatible adapter for model discovery and non-streaming Chat Completions
+- Provider API Key write path with non-plaintext read responses
 - Provider connection test and model discovery APIs
-- OpenAI-compatible `/models` discovery adapter skeleton
 - Router scoring, candidate selector, and circuit-breaker skeleton
 - Request log persistence for chat completions
 - Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
@@ -68,7 +70,7 @@ The current codebase provides:
 - Web UI forms for providers, unified models, candidates, router health, and model discovery
 - Backend pytest and frontend Vitest baseline
 
-The project still intentionally uses a Mock Provider. This validates routing, persistence, UI, and tests before real upstream API integrations are added.
+The default setup still uses a Mock Provider. Add an OpenAI or OpenAI-Compatible provider in the Web UI, discover models, and attach an upstream model as a candidate to route real traffic.
 
 ## Smoke test
 
