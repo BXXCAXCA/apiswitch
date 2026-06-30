@@ -2,13 +2,13 @@
 
 APISwitch is a local-first AI API gateway and model router.
 
-Current milestone: `v0.1.0-skeleton`.
+Current milestone: `v0.2.0-core-gateway` in progress.
 
 ## Tech stack
 
 - Backend: Python 3.11+, FastAPI, SQLAlchemy, Alembic, SQLite
 - Frontend: Vue 3, TypeScript, Vite, Pinia, Vue Router, Naive UI
-- First-stage provider: Mock Provider
+- Current provider: Mock Provider through the real routing pipeline
 
 ## Development startup
 
@@ -50,17 +50,29 @@ cd ../frontend
 npm run test
 ```
 
-## First-stage scope
+## Implemented scope
 
-The skeleton provides:
+The current codebase provides:
 
 - FastAPI app and OpenAPI groups
-- SQLite, SQLAlchemy models, Alembic migration
-- OpenAI/Responses/Anthropic-compatible endpoint skeletons
+- SQLite, SQLAlchemy models, Alembic migration, and development bootstrap seed
+- OpenAI Chat Completions endpoint routed through the unified-model selector
+- OpenAI Responses and Anthropic Messages endpoint skeletons
 - Mock Provider and provider registry
-- Router scoring and circuit-breaker skeleton
-- Admin Mock APIs for Web UI
-- Vue 3 + Naive UI admin shell
+- Router scoring, candidate selector, and circuit-breaker skeleton
+- Request log persistence for chat completions
+- Admin APIs backed by SQLite for providers, unified models, logs, dashboard summary, and settings
+- Vue 3 + Naive UI admin shell connected to the backend APIs
 - Backend pytest and frontend Vitest baseline
 
-The first implementation intentionally uses a Mock Provider so routing, UI, persistence, and tests can be validated before real upstream API integrations are added.
+The project still intentionally uses a Mock Provider. This validates routing, persistence, UI, and tests before real upstream API integrations are added.
+
+## Smoke test
+
+```powershell
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/v1/models
+curl -X POST http://127.0.0.1:8080/v1/chat/completions `
+  -H "Content-Type: application/json" `
+  -d '{"model":"code-best","messages":[{"role":"user","content":"hello"}]}'
+```
