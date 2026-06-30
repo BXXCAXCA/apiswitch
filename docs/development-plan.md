@@ -26,21 +26,24 @@ Goal: make OpenAI Chat Completions pass through the real APISwitch routing pipel
 Completed:
 
 - Database bootstrap and seed data for `mock-main`, `mock-chat`, and `code-best`
-- Unified-model candidate selector
+- Unified-model candidate selector and ranked candidate list
 - Gateway error types
 - Request log persistence for `/v1/chat/completions`
+- Provider health updates after candidate success/failure
+- Retry chain across enabled ranked candidates
 - Admin providers API backed by SQLite
 - Admin unified models API backed by SQLite
 - Admin logs API backed by SQLite
 - Dashboard summary backed by request logs
+- Admin router health API
+- Frontend router health page connected to backend data
 
 Remaining:
 
-- Persist provider health updates after success/failure
-- Implement retry chain across multiple enabled candidates
 - Add candidate CRUD endpoints
 - Add admin UI forms for provider and unified model creation
-- Expand tests around request log persistence and selector behavior
+- Expand tests around selector ranking and provider health updates
+- Add provider health to circuit breaker transition logic
 
 ## Later milestones
 
