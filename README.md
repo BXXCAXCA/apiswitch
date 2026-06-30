@@ -57,6 +57,7 @@ The current codebase provides:
 - FastAPI app and OpenAPI groups
 - SQLite, SQLAlchemy models, Alembic migration, and development bootstrap seed
 - OpenAI Chat Completions endpoint routed through the unified-model selector
+- OpenAI Responses endpoint converted to Chat Completions and routed through the unified-model selector
 - Streaming `text/event-stream` support for `/v1/chat/completions`
 - SSE model-name rewrite so clients see the unified model while APISwitch records the upstream model
 - Anthropic Messages endpoint routed through the unified-model selector
@@ -69,7 +70,7 @@ The current codebase provides:
 - Provider API Key write path with non-plaintext read responses
 - Provider connection test and model discovery APIs
 - Router scoring, candidate selector, and circuit-breaker skeleton
-- Request log persistence for chat completions and messages
+- Request log persistence for chat completions, responses, and messages
 - Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
 - Vue 3 + Naive UI admin shell connected to the backend APIs
 - Web UI forms for providers, unified models, candidates, router health, and model discovery
@@ -88,6 +89,9 @@ curl -X POST http://127.0.0.1:8080/v1/chat/completions `
 curl -N -X POST http://127.0.0.1:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{"model":"code-best","stream":true,"messages":[{"role":"user","content":"hello"}]}'
+curl -X POST http://127.0.0.1:8080/v1/responses `
+  -H "Content-Type: application/json" `
+  -d '{"model":"code-best","input":"hello"}'
 curl -X POST http://127.0.0.1:8080/v1/messages `
   -H "Content-Type: application/json" `
   -d '{"model":"code-best","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}'
