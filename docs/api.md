@@ -3,6 +3,8 @@
 ## Gateway
 
 - `POST /v1/chat/completions`
+  - Supports non-streaming JSON responses.
+  - Supports `stream=true` with `text/event-stream` OpenAI-compatible SSE output.
 - `POST /v1/responses`
 - `POST /v1/messages`
 - `GET /v1/models`
