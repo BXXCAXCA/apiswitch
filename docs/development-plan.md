@@ -21,7 +21,7 @@ Deliverables:
 
 Status: in progress.
 
-Goal: make OpenAI Chat Completions and Anthropic Messages pass through the real APISwitch routing pipeline while supporting Mock, OpenAI, OpenAI-Compatible, Anthropic, and Gemini providers.
+Goal: make OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages pass through the real APISwitch routing pipeline while supporting Mock, OpenAI, OpenAI-Compatible, Anthropic, and Gemini providers.
 
 Completed:
 
@@ -49,6 +49,8 @@ Completed:
 - Streaming candidate fallback before the first SSE chunk is sent
 - Strict-compatible streaming failure handling once SSE output has started
 - Gateway execution for Anthropic Messages
+- OpenAI Responses input conversion to Chat Completions
+- OpenAI Responses non-streaming gateway execution and response conversion
 - SSE model-name rewrite while tracking actual upstream model in APISwitch metadata
 - Gateway execution from database Provider config and candidate upstream model
 - Client response model preservation while tracking actual upstream model in `apiswitch.upstream_model`
@@ -59,7 +61,7 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Anthropic Messages, Gemini conversion, and router health
+- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, and router health
 - Isolated pytest SQLite database
 
 Remaining:
@@ -67,13 +69,12 @@ Remaining:
 - Expand tests around selector ranking and provider health updates
 - Add provider health to circuit breaker transition logic
 - Add richer edit/delete actions to frontend tables
-- Add Responses protocol conversion
+- Add Responses streaming conversion
 
 ## Later milestones
 
 1. Health scoring, retry, circuit breaker
-2. Responses protocol conversion
-3. Full Web UI management
-4. Files, multimodal, embeddings, cache
-5. WebDAV and Agent configuration
-6. Security, packaging, Docker, Windows release
+2. Full Web UI management
+3. Files, multimodal, embeddings, cache
+4. WebDAV and Agent configuration
+5. Security, packaging, Docker, Windows release
