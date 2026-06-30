@@ -18,7 +18,7 @@ class SelectedCandidate:
     score: float
 
 
-def select_best_candidate(db: Session, unified_model_name: str) -> SelectedCandidate:
+def list_ranked_candidates(db: Session, unified_model_name: str) -> list[SelectedCandidate]:
     unified_model = db.scalar(
         select(UnifiedModel).where(
             UnifiedModel.name == unified_model_name,
@@ -50,11 +50,13 @@ def select_best_candidate(db: Session, unified_model_name: str) -> SelectedCandi
         stability = 100.0 if total_count == 0 else (success_count / total_count) * 100.0
         avg_latency = health.avg_latency_ms if health and health.avg_latency_ms else 1000.0
         speed = max(0.0, min(100.0, 100.0 - (avg_latency / 50.0)))
+        failure_penalty = float(health.consecutive_failures * 10) if health else 0.0
         score = calculate_score(
             CandidateScoreInput(
                 stability_score=stability,
                 speed_score=speed,
                 manual_priority_adjustment=float(candidate.manual_priority) / 100.0,
+                failure_penalty=failure_penalty,
             )
         )
         scored.append(
@@ -68,4 +70,8 @@ def select_best_candidate(db: Session, unified_model_name: str) -> SelectedCandi
             )
         )
 
-    return max(scored, key=lambda item: item.score)
+    return sorted(scored, key=lambda item: item.score, reverse=True)
+
+
+def select_best_candidate(db: Session, unified_model_name: str) -> SelectedCandidate:
+    return list_ranked_candidates(db, unified_model_name)[0]
