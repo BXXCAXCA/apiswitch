@@ -2,7 +2,7 @@
   <n-layout has-sider style="height: 100vh">
     <n-layout-sider bordered collapse-mode="width" :collapsed-width="64" :width="240">
       <div class="brand">APISwitch</div>
-      <n-menu :options="menuOptions" :value="$route.path" @update:value="router.push" />
+      <n-menu :options="menuOptions" :value="$route.path" @update:value="handleMenuUpdate" />
     </n-layout-sider>
     <n-layout>
       <n-layout-header bordered class="header">AI API Gateway Control Panel</n-layout-header>
@@ -31,6 +31,10 @@ const menuOptions = [
   { label: label('Agent 配置', '/agents'), key: '/agents' },
   { label: label('系统设置', '/settings'), key: '/settings' }
 ]
+
+function handleMenuUpdate(key: string) {
+  router.push(key)
+}
 </script>
 
 <style scoped>
