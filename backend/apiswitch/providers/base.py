@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
-from apiswitch.schemas.gateway import ChatCompletionRequest
+from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
 
 
 class ProviderError(Exception):
@@ -18,6 +18,12 @@ class ProviderAdapter(ABC):
     @abstractmethod
     async def chat(self, request: ChatCompletionRequest) -> dict[str, Any]:
         raise NotImplementedError
+
+    async def messages(self, request: AnthropicMessagesRequest) -> dict[str, Any]:
+        raise ProviderError(
+            f"Anthropic Messages is not supported by provider type: {self.provider_type}",
+            "messages_not_supported",
+        )
 
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
         raise ProviderError(
