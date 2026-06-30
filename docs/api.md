@@ -20,6 +20,9 @@
 - `GET /api/admin/providers/{provider_id}`
 - `PATCH /api/admin/providers/{provider_id}`
 - `DELETE /api/admin/providers/{provider_id}`
+- `POST /api/admin/providers/{provider_id}/test`
+- `POST /api/admin/providers/{provider_id}/discover-models`
+- `GET /api/admin/providers/{provider_id}/models`
 
 ### Unified Models
 
