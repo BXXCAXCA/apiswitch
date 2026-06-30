@@ -9,12 +9,14 @@ export interface Provider {
   timeout_seconds: number
   proxy_type?: string | null
   proxy_url?: string | null
+  api_key_configured: boolean
 }
 
 export interface ProviderCreate {
   name: string
   type: string
   base_url: string
+  api_key?: string | null
   enabled: boolean
   timeout_seconds: number
   proxy_type?: string | null
