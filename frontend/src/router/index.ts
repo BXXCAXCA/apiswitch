@@ -3,6 +3,7 @@ import AdminLayout from '../layouts/AdminLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import ProvidersView from '../views/ProvidersView.vue'
 import UnifiedModelsView from '../views/UnifiedModelsView.vue'
+import RouterHealthView from '../views/RouterHealthView.vue'
 import PlaceholderView from '../views/PlaceholderView.vue'
 
 export const router = createRouter({
@@ -17,7 +18,7 @@ export const router = createRouter({
         { path: 'providers', component: ProvidersView },
         { path: 'unified-models', component: UnifiedModelsView },
         { path: 'model-discovery', component: PlaceholderView, props: { title: '模型发现' } },
-        { path: 'router-health', component: PlaceholderView, props: { title: '路由 / 熔断状态' } },
+        { path: 'router-health', component: RouterHealthView },
         { path: 'logs', component: PlaceholderView, props: { title: '调用日志' } },
         { path: 'budgets', component: PlaceholderView, props: { title: '预算控制' } },
         { path: 'tokens', component: PlaceholderView, props: { title: 'API Token 管理' } },
