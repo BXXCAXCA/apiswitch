@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -23,7 +24,7 @@ class OpenAIProviderAdapter(ProviderAdapter):
     async def chat(self, request: ChatCompletionRequest) -> dict[str, Any]:
         payload = request.model_dump(exclude_none=True)
         if payload.get("stream"):
-            raise ProviderError("OpenAI streaming is not implemented yet", "streaming_not_implemented")
+            raise ProviderError("Use stream_chat for streaming requests", "invalid_stream_path")
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 response = await client.post(
@@ -40,6 +41,32 @@ class OpenAIProviderAdapter(ProviderAdapter):
                 "upstream_http_error",
             )
         return response.json()
+
+    async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
+        payload = request.model_dump(exclude_none=True)
+        payload["stream"] = True
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=self.timeout_seconds,
+                ) as response:
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        raise ProviderError(
+                            f"OpenAI stream request failed with status {response.status_code}: {body.decode('utf-8', errors='ignore')}",
+                            "upstream_http_error",
+                        )
+                    async for chunk in response.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except ProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"OpenAI stream request failed: {exc}") from exc
 
     async def list_models(self) -> list[dict[str, Any]]:
         try:
