@@ -1,0 +1,52 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from apiswitch import __version__
+from apiswitch.api.admin import dashboard, logs, providers, settings as admin_settings, unified_models
+from apiswitch.api.gateway import chat_completions, messages, models, responses
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="APISwitch",
+        version=__version__,
+        description="Local-first AI API gateway, model router, and control panel.",
+        openapi_tags=[
+            {"name": "System", "description": "Runtime and health endpoints."},
+            {"name": "Gateway - OpenAI Chat", "description": "OpenAI Chat Completions compatible API."},
+            {"name": "Gateway - OpenAI Responses", "description": "OpenAI Responses compatible API."},
+            {"name": "Gateway - Anthropic Messages", "description": "Anthropic Messages compatible API."},
+            {"name": "Gateway - Models", "description": "Gateway-visible model listing."},
+            {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
+            {"name": "Admin - Providers", "description": "Provider management."},
+            {"name": "Admin - Unified Models", "description": "Unified model management."},
+            {"name": "Admin - Logs", "description": "Request logs and statistics."},
+            {"name": "Admin - Settings", "description": "System settings."},
+        ],
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.get("/health", tags=["System"])
+    async def health() -> dict[str, str]:
+        return {"status": "ok", "service": "apiswitch", "version": __version__}
+
+    app.include_router(chat_completions.router)
+    app.include_router(responses.router)
+    app.include_router(messages.router)
+    app.include_router(models.router)
+    app.include_router(dashboard.router)
+    app.include_router(providers.router)
+    app.include_router(unified_models.router)
+    app.include_router(logs.router)
+    app.include_router(admin_settings.router)
+    return app
+
+
+app = create_app()
