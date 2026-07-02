@@ -42,9 +42,11 @@ Completed:
 - Provider API Key write path with non-plaintext read responses
 - Unified model CRUD endpoints
 - Unified model candidate CRUD endpoints
+- Duplicate unified-model candidate prevention
 - Frontend Provider create, edit, enable/disable, and delete actions
 - Frontend unified model create, edit, enable/disable, and delete actions
 - Frontend candidate create, edit, enable/disable, and delete actions
+- Frontend model discovery page can add discovered upstream models directly as candidates
 - Provider connection test API
 - Provider model discovery and ProviderModel sync
 - OpenAI Provider adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
@@ -69,7 +71,7 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, provider discovery, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
+- Tests for provider CRUD, API Key behavior, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
