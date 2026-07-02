@@ -101,19 +101,23 @@ def test_unified_model_and_candidate_crud(client):
     assert created_model.status_code == 200
     model = created_model.json()
 
+    payload = {
+        "provider_id": provider["id"],
+        "upstream_model": "mock-chat",
+        "manual_priority": 80,
+        "enabled": True,
+        "capabilities": ["text"],
+    }
     created_candidate = client.post(
         f"/api/admin/unified-models/{model['id']}/candidates",
-        json={
-            "provider_id": provider["id"],
-            "upstream_model": "mock-chat",
-            "manual_priority": 80,
-            "enabled": True,
-            "capabilities": ["text"],
-        },
+        json=payload,
     )
     assert created_candidate.status_code == 200
     candidate = created_candidate.json()
     assert candidate["provider_name"] == "mock-candidate-provider"
+
+    duplicate = client.post(f"/api/admin/unified-models/{model['id']}/candidates", json=payload)
+    assert duplicate.status_code == 409
 
     listed = client.get(f"/api/admin/unified-models/{model['id']}/candidates")
     assert listed.status_code == 200
