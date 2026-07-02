@@ -76,6 +76,8 @@ The current codebase provides:
 - Vue 3 + Naive UI admin shell connected to the backend APIs
 - Web UI management for providers, unified models, candidates, router health, and model discovery
 - Provider, unified model, and candidate create/edit/enable/disable/delete actions
+- Model discovery can add discovered upstream models directly as unified-model candidates
+- Duplicate unified-model candidates are rejected by the Admin API
 - Backend pytest and frontend Vitest baseline
 
 The default setup still uses a Mock Provider. Add an OpenAI, OpenAI-Compatible, Anthropic, or Gemini provider in the Web UI, discover models, and attach an upstream model as a candidate to route real traffic.
