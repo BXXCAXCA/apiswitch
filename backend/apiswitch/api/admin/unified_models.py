@@ -44,6 +44,38 @@ def _get_candidate(db: Session, candidate_id: int) -> UnifiedModelCandidate:
     return candidate
 
 
+def _find_duplicate_candidate(
+    db: Session,
+    model_id: int,
+    provider_id: int,
+    upstream_model: str,
+    exclude_candidate_id: int | None = None,
+) -> UnifiedModelCandidate | None:
+    statement = select(UnifiedModelCandidate).where(
+        UnifiedModelCandidate.unified_model_id == model_id,
+        UnifiedModelCandidate.provider_id == provider_id,
+        UnifiedModelCandidate.upstream_model == upstream_model,
+    )
+    if exclude_candidate_id is not None:
+        statement = statement.where(UnifiedModelCandidate.id != exclude_candidate_id)
+    return db.scalar(statement.limit(1))
+
+
+def _reject_duplicate_candidate(
+    db: Session,
+    model_id: int,
+    provider_id: int,
+    upstream_model: str,
+    exclude_candidate_id: int | None = None,
+) -> None:
+    duplicate = _find_duplicate_candidate(db, model_id, provider_id, upstream_model, exclude_candidate_id)
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Candidate already exists for this unified model, provider, and upstream model",
+        )
+
+
 def _candidate_to_read(candidate: UnifiedModelCandidate, provider: Provider) -> UnifiedModelCandidateRead:
     return UnifiedModelCandidateRead(
         id=candidate.id,
@@ -159,6 +191,7 @@ async def create_candidate(
 ) -> UnifiedModelCandidateRead:
     _get_unified_model(db, model_id)
     provider = _get_provider(db, payload.provider_id)
+    _reject_duplicate_candidate(db, model_id, payload.provider_id, payload.upstream_model)
     candidate = UnifiedModelCandidate(
         unified_model_id=model_id,
         provider_id=payload.provider_id,
@@ -185,8 +218,11 @@ async def update_candidate(
     if candidate.unified_model_id != model_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     data = payload.model_dump(exclude_unset=True)
+    next_provider_id = data.get("provider_id", candidate.provider_id)
+    next_upstream_model = data.get("upstream_model", candidate.upstream_model)
     if "provider_id" in data:
         _get_provider(db, data["provider_id"])
+    _reject_duplicate_candidate(db, model_id, next_provider_id, next_upstream_model, exclude_candidate_id=candidate_id)
     if "capabilities" in data:
         candidate.capabilities_json = {"capabilities": data.pop("capabilities")}
     for key, value in data.items():
