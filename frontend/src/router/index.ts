@@ -10,7 +10,7 @@ import TokensView from '../views/TokensView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import BudgetsView from '../views/BudgetsView.vue'
 import WebDAVView from '../views/WebDAVView.vue'
-import PlaceholderView from '../views/PlaceholderView.vue'
+import AgentsView from '../views/AgentsView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -30,7 +30,7 @@ export const router = createRouter({
         { path: 'settings', component: SettingsView },
         { path: 'budgets', component: BudgetsView },
         { path: 'webdav', component: WebDAVView },
-        { path: 'agents', component: PlaceholderView, props: { title: 'Agent 配置' } }
+        { path: 'agents', component: AgentsView }
       ]
     }
   ]
