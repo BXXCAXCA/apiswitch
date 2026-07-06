@@ -139,10 +139,14 @@ class Budget(Base, TimestampMixin):
     __tablename__ = "budgets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), default="Default budget")
     scope: Mapped[str] = mapped_column(String(64))
     scope_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     monthly_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
     currency: Mapped[str] = mapped_column(String(16), default="USD")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    spent_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    alert_threshold_percent: Mapped[int] = mapped_column(Integer, default=80)
 
 
 class FileCache(Base, TimestampMixin):
