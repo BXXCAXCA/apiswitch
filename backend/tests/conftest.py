@@ -15,3 +15,13 @@ from apiswitch.app import app  # noqa: E402
 @pytest.fixture()
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture()
+def gateway_headers(client: TestClient) -> dict[str, str]:
+    response = client.post(
+        "/api/admin/tokens",
+        json={"name": "pytest-gateway", "scopes": ["gateway:invoke"]},
+    )
+    token = response.json()["token"]
+    return {"Authorization": f"Bearer {token}"}
