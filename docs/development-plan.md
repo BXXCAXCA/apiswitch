@@ -44,6 +44,8 @@ Completed:
 - Gateway API Token authentication on public `/v1/*` endpoints
 - Gateway token enabled-state, expiry, and `gateway:invoke` scope checks
 - Gateway token `last_used_at` update after successful authentication
+- Persistent system settings API backed by SQLite
+- Frontend system settings page
 - Frontend API Token management page
 - Unified model CRUD endpoints
 - Unified model candidate CRUD endpoints
@@ -77,14 +79,14 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, API tokens, gateway auth, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
+- Tests for provider CRUD, API Key behavior, API tokens, gateway auth, persistent settings, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
 
 - Expand tests around selector ranking edge cases
 - Add Responses streaming conversion
-- Add UI pages for budgets, settings, WebDAV, and agents
+- Add UI pages for budgets, WebDAV, and agents
 
 ## Later milestones
 
