@@ -127,8 +127,12 @@ class ApiToken(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
+    token_prefix: Mapped[str] = mapped_column(String(32), index=True)
     token_hash: Mapped[str] = mapped_column(String(256), unique=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    scopes_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Budget(Base, TimestampMixin):
