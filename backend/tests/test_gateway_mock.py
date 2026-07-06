@@ -1,6 +1,7 @@
-def test_chat_completions_mock(client):
+def test_chat_completions_mock(client, gateway_headers):
     response = client.post(
         "/v1/chat/completions",
+        headers=gateway_headers,
         json={"model": "code-best", "messages": [{"role": "user", "content": "hello"}]},
     )
     assert response.status_code == 200
@@ -16,16 +17,17 @@ def test_chat_completions_mock(client):
     assert any(item["unified_model"] == "code-best" for item in logs["items"])
 
 
-def test_unknown_unified_model_returns_error(client):
+def test_unknown_unified_model_returns_error(client, gateway_headers):
     response = client.post(
         "/v1/chat/completions",
+        headers=gateway_headers,
         json={"model": "missing-model", "messages": [{"role": "user", "content": "hello"}]},
     )
     assert response.status_code == 400
     assert response.json()["detail"]["type"] == "unified_model_not_found"
 
 
-def test_models_mock(client):
-    response = client.get("/v1/models")
+def test_models_mock(client, gateway_headers):
+    response = client.get("/v1/models", headers=gateway_headers)
     assert response.status_code == 200
     assert response.json()["object"] == "list"
