@@ -48,6 +48,8 @@ Completed:
 - Frontend budget management page
 - WebDAV profile admin API with password write-only storage and connection testing
 - Frontend WebDAV profile management page
+- Agent config admin API with config path checks, enable/disable, backup path tracking, notes, and delete
+- Frontend Agent config management page
 - Persistent system settings API backed by SQLite
 - Frontend system settings page
 - Frontend API Token management page
@@ -83,14 +85,14 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, API tokens, budgets, WebDAV, gateway auth, persistent settings, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
+- Tests for provider CRUD, API Key behavior, API tokens, budgets, WebDAV, agents, gateway auth, persistent settings, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
 
 - Expand tests around selector ranking edge cases
 - Add Responses streaming conversion
-- Add UI page for agents
+- Connect Agent configs to real import/export backup workflows
 - Connect WebDAV to real import/export sync workflows
 - Connect budgets to real request cost accounting and enforcement
 
