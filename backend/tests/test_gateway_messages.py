@@ -1,6 +1,7 @@
-def test_anthropic_messages_mock_route(client):
+def test_anthropic_messages_mock_route(client, gateway_headers):
     response = client.post(
         "/v1/messages",
+        headers=gateway_headers,
         json={
             "model": "code-best",
             "max_tokens": 128,
