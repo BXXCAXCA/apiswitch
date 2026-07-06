@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from apiswitch import __version__
 from apiswitch.api.admin import (
+    agents,
     api_tokens,
     budgets,
     dashboard,
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
             {"name": "Admin - API Tokens", "description": "Gateway API token management."},
             {"name": "Admin - Budgets", "description": "Budget limits and spend tracking."},
             {"name": "Admin - WebDAV", "description": "WebDAV sync profile management."},
+            {"name": "Admin - Agents", "description": "Local Agent config management."},
             {"name": "Admin - Settings", "description": "System settings."},
         ],
     )
@@ -66,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(api_tokens.router)
     app.include_router(budgets.router)
     app.include_router(webdav.router)
+    app.include_router(agents.router)
     app.include_router(admin_settings.router)
     return app
 
