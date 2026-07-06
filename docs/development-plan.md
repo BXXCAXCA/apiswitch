@@ -47,6 +47,7 @@ Completed:
 - Frontend unified model create, edit, enable/disable, and delete actions
 - Frontend candidate create, edit, enable/disable, and delete actions
 - Frontend model discovery page can add discovered upstream models directly as candidates
+- Frontend request logs page with status, protocol, provider, latency, tokens, errors, and retry-chain details
 - Provider connection test API
 - Provider model discovery and ProviderModel sync
 - OpenAI Provider adapter for `/models`, non-streaming `/chat/completions`, and streaming `/chat/completions`
@@ -78,7 +79,7 @@ Remaining:
 
 - Expand tests around selector ranking edge cases
 - Add Responses streaming conversion
-- Add UI pages for logs, budgets, API tokens, settings, WebDAV, and agents
+- Add UI pages for budgets, API tokens, settings, WebDAV, and agents
 
 ## Later milestones
 
