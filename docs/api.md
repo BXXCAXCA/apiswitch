@@ -52,6 +52,14 @@
 
 - `GET /api/admin/logs`
 
+### API Tokens
+
+- `GET /api/admin/tokens`
+- `POST /api/admin/tokens`
+  - Returns the plaintext token only once at creation time.
+- `PATCH /api/admin/tokens/{token_id}`
+- `DELETE /api/admin/tokens/{token_id}`
+
 ### Settings
 
 - `GET /api/admin/settings`
