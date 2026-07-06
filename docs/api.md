@@ -79,6 +79,14 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
 - `DELETE /api/admin/webdav/{profile_id}`
 - `POST /api/admin/webdav/{profile_id}/test`
 
+### Agents
+
+- `GET /api/admin/agents`
+- `POST /api/admin/agents`
+- `PATCH /api/admin/agents/{agent_id}`
+- `DELETE /api/admin/agents/{agent_id}`
+- `POST /api/admin/agents/{agent_id}/check`
+
 ### Settings
 
 - `GET /api/admin/settings`
