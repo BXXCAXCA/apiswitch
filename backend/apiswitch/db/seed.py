@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import Provider, ProviderModel, UnifiedModel, UnifiedModelCandidate
+from apiswitch.services.settings import seed_default_settings
 
 
 def seed_default_data(db: Session) -> None:
@@ -67,3 +68,4 @@ def seed_default_data(db: Session) -> None:
         )
 
     db.commit()
+    seed_default_settings(db)
