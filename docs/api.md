@@ -71,6 +71,14 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
 - `PATCH /api/admin/budgets/{budget_id}`
 - `DELETE /api/admin/budgets/{budget_id}`
 
+### WebDAV
+
+- `GET /api/admin/webdav`
+- `POST /api/admin/webdav`
+- `PATCH /api/admin/webdav/{profile_id}`
+- `DELETE /api/admin/webdav/{profile_id}`
+- `POST /api/admin/webdav/{profile_id}/test`
+
 ### Settings
 
 - `GET /api/admin/settings`
