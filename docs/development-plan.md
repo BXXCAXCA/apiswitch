@@ -41,6 +41,9 @@ Completed:
 - Provider CRUD endpoints
 - Provider API Key write path with non-plaintext read responses
 - API Token admin API with one-time plaintext token return, prefix-only listing, scopes, expiry, enable/disable, and delete
+- Gateway API Token authentication on public `/v1/*` endpoints
+- Gateway token enabled-state, expiry, and `gateway:invoke` scope checks
+- Gateway token `last_used_at` update after successful authentication
 - Frontend API Token management page
 - Unified model CRUD endpoints
 - Unified model candidate CRUD endpoints
@@ -74,7 +77,7 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, API tokens, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
+- Tests for provider CRUD, API Key behavior, API tokens, gateway auth, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
 Remaining:
@@ -82,7 +85,6 @@ Remaining:
 - Expand tests around selector ranking edge cases
 - Add Responses streaming conversion
 - Add UI pages for budgets, settings, WebDAV, and agents
-- Enforce gateway API token authentication on public `/v1/*` endpoints
 
 ## Later milestones
 
