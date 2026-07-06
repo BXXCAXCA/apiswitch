@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apiswitch import __version__
 from apiswitch.api.admin import (
     api_tokens,
+    budgets,
     dashboard,
     logs,
     providers,
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
             {"name": "Admin - Router Health", "description": "Candidate scoring and health state."},
             {"name": "Admin - Logs", "description": "Request logs and statistics."},
             {"name": "Admin - API Tokens", "description": "Gateway API token management."},
+            {"name": "Admin - Budgets", "description": "Budget limits and spend tracking."},
             {"name": "Admin - Settings", "description": "System settings."},
         ],
     )
@@ -60,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(router_health.router)
     app.include_router(logs.router)
     app.include_router(api_tokens.router)
+    app.include_router(budgets.router)
     app.include_router(admin_settings.router)
     return app
 
