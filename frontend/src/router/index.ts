@@ -9,6 +9,7 @@ import LogsView from '../views/LogsView.vue'
 import TokensView from '../views/TokensView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import BudgetsView from '../views/BudgetsView.vue'
+import WebDAVView from '../views/WebDAVView.vue'
 import PlaceholderView from '../views/PlaceholderView.vue'
 
 export const router = createRouter({
@@ -28,7 +29,7 @@ export const router = createRouter({
         { path: 'tokens', component: TokensView },
         { path: 'settings', component: SettingsView },
         { path: 'budgets', component: BudgetsView },
-        { path: 'webdav', component: PlaceholderView, props: { title: 'WebDAV 导入导出' } },
+        { path: 'webdav', component: WebDAVView },
         { path: 'agents', component: PlaceholderView, props: { title: 'Agent 配置' } }
       ]
     }
