@@ -72,9 +72,10 @@ The current codebase provides:
 - Router scoring, candidate selector, retry chain, provider health, and persistent circuit breaker state machine
 - Circuit breaker states exposed in Router Health and used to skip unavailable candidates
 - Request log persistence for chat completions, responses, and messages
+- Request logs UI with status, protocol, provider, upstream model, latency, token counts, errors, and retry-chain details
 - Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, and settings
 - Vue 3 + Naive UI admin shell connected to the backend APIs
-- Web UI management for providers, unified models, candidates, router health, and model discovery
+- Web UI management for providers, unified models, candidates, router health, logs, and model discovery
 - Provider, unified model, and candidate create/edit/enable/disable/delete actions
 - Model discovery can add discovered upstream models directly as unified-model candidates
 - Duplicate unified-model candidates are rejected by the Admin API
@@ -99,6 +100,7 @@ curl -X POST http://127.0.0.1:8080/v1/responses `
 curl -X POST http://127.0.0.1:8080/v1/messages `
   -H "Content-Type: application/json" `
   -d '{"model":"code-best","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}'
+curl http://127.0.0.1:8080/api/admin/logs
 curl http://127.0.0.1:8080/api/admin/router-health
 curl -X POST http://127.0.0.1:8080/api/admin/providers/1/test
 curl -X POST http://127.0.0.1:8080/api/admin/providers/1/discover-models
