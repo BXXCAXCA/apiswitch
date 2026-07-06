@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from apiswitch.api.deps import get_db
+from apiswitch.api.deps import get_db, require_gateway_token
 from apiswitch.gateway.errors import GatewayError
 from apiswitch.gateway.executor import gateway_executor
 from apiswitch.providers.base import ProviderError
@@ -14,6 +14,7 @@ router = APIRouter(prefix="/v1", tags=["Gateway - Anthropic Messages"])
 async def create_message(
     payload: AnthropicMessagesRequest,
     db: Session = Depends(get_db),
+    _auth=Depends(require_gateway_token),
 ) -> dict:
     try:
         return await gateway_executor.execute_messages(payload, db)
