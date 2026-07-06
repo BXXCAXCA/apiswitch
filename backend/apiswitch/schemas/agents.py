@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentConfigCreate(BaseModel):
@@ -10,7 +10,7 @@ class AgentConfigCreate(BaseModel):
     last_backup_path: str | None = None
     enabled: bool = True
     notes: str | None = None
-    settings: dict[str, Any] = {}
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentConfigUpdate(BaseModel):
