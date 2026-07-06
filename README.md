@@ -61,6 +61,7 @@ The current codebase provides:
 - Streaming `text/event-stream` support for `/v1/chat/completions`
 - SSE model-name rewrite so clients see the unified model while APISwitch records the upstream model
 - Anthropic Messages endpoint routed through the unified-model selector
+- Gateway API Token authentication for `/v1/*` endpoints with scope, expiry, enabled-state, and last-used checks
 - Mock Provider adapter with Chat Completions and Anthropic Messages support
 - OpenAI Provider adapter for model discovery, non-streaming Chat Completions, and streaming Chat Completions
 - OpenAI-Compatible adapter for model discovery, non-streaming Chat Completions, and streaming Chat Completions
@@ -82,24 +83,32 @@ The current codebase provides:
 - Duplicate unified-model candidates are rejected by the Admin API
 - Backend pytest and frontend Vitest baseline
 
-The default setup still uses a Mock Provider. Add an OpenAI, OpenAI-Compatible, Anthropic, or Gemini provider in the Web UI, discover models, and attach an upstream model as a candidate to route real traffic.
+The default setup still uses a Mock Provider. Add an OpenAI, OpenAI-Compatible, Anthropic, or Gemini provider in the Web UI, discover models, attach an upstream model as a candidate, and create an API Token for gateway calls.
 
 ## Smoke test
 
 ```powershell
 curl http://127.0.0.1:8080/health
-curl http://127.0.0.1:8080/v1/models
+$tokenResponse = curl -X POST http://127.0.0.1:8080/api/admin/tokens `
+  -H "Content-Type: application/json" `
+  -d '{"name":"local-dev","scopes":["gateway:invoke"]}' | ConvertFrom-Json
+$token = $tokenResponse.token
+curl http://127.0.0.1:8080/v1/models -H "Authorization: Bearer $token"
 curl -X POST http://127.0.0.1:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $token" `
   -d '{"model":"code-best","messages":[{"role":"user","content":"hello"}]}'
 curl -N -X POST http://127.0.0.1:8080/v1/chat/completions `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $token" `
   -d '{"model":"code-best","stream":true,"messages":[{"role":"user","content":"hello"}]}'
 curl -X POST http://127.0.0.1:8080/v1/responses `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $token" `
   -d '{"model":"code-best","input":"hello"}'
 curl -X POST http://127.0.0.1:8080/v1/messages `
   -H "Content-Type: application/json" `
+  -H "Authorization: Bearer $token" `
   -d '{"model":"code-best","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}'
 curl http://127.0.0.1:8080/api/admin/logs
 curl http://127.0.0.1:8080/api/admin/tokens
