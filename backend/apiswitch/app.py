@@ -11,6 +11,7 @@ from apiswitch.api.admin import (
     router_health,
     settings as admin_settings,
     unified_models,
+    webdav,
 )
 from apiswitch.api.gateway import chat_completions, messages, models, responses
 from apiswitch.db.bootstrap import init_database
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
             {"name": "Admin - Logs", "description": "Request logs and statistics."},
             {"name": "Admin - API Tokens", "description": "Gateway API token management."},
             {"name": "Admin - Budgets", "description": "Budget limits and spend tracking."},
+            {"name": "Admin - WebDAV", "description": "WebDAV sync profile management."},
             {"name": "Admin - Settings", "description": "System settings."},
         ],
     )
@@ -63,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(logs.router)
     app.include_router(api_tokens.router)
     app.include_router(budgets.router)
+    app.include_router(webdav.router)
     app.include_router(admin_settings.router)
     return app
 
