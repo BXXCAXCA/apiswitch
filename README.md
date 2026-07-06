@@ -76,10 +76,11 @@ The current codebase provides:
 - Request logs UI with status, protocol, provider, upstream model, latency, token counts, errors, and retry-chain details
 - API Token admin API and UI with one-time token display, prefix-only listing, enable/disable, scopes, expiry, and delete
 - Budget admin API and UI with monthly limits, spent amount, usage percentage, alert threshold, enable/disable, and delete
+- WebDAV profile admin API and UI with password write-only storage, enable/disable, delete, and connection testing
 - Persistent system settings API and UI backed by SQLite
-- Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, API tokens, budgets, settings, and system configuration
+- Admin APIs backed by SQLite for providers, unified models, provider models, logs, dashboard summary, router health, API tokens, budgets, WebDAV profiles, settings, and system configuration
 - Vue 3 + Naive UI admin shell connected to the backend APIs
-- Web UI management for providers, unified models, candidates, router health, logs, API tokens, budgets, settings, and model discovery
+- Web UI management for providers, unified models, candidates, router health, logs, API tokens, budgets, WebDAV, settings, and model discovery
 - Provider, unified model, and candidate create/edit/enable/disable/delete actions
 - Model discovery can add discovered upstream models directly as unified-model candidates
 - Duplicate unified-model candidates are rejected by the Admin API
@@ -114,6 +115,7 @@ curl -X POST http://127.0.0.1:8080/v1/messages `
   -d '{"model":"code-best","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}'
 curl http://127.0.0.1:8080/api/admin/settings
 curl http://127.0.0.1:8080/api/admin/budgets
+curl http://127.0.0.1:8080/api/admin/webdav
 curl http://127.0.0.1:8080/api/admin/logs
 curl http://127.0.0.1:8080/api/admin/tokens
 curl http://127.0.0.1:8080/api/admin/router-health
