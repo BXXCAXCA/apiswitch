@@ -64,6 +64,13 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
 - `PATCH /api/admin/tokens/{token_id}`
 - `DELETE /api/admin/tokens/{token_id}`
 
+### Budgets
+
+- `GET /api/admin/budgets`
+- `POST /api/admin/budgets`
+- `PATCH /api/admin/budgets/{budget_id}`
+- `DELETE /api/admin/budgets/{budget_id}`
+
 ### Settings
 
 - `GET /api/admin/settings`
