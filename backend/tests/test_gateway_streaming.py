@@ -1,7 +1,8 @@
-def test_chat_completions_streaming_mock(client):
+def test_chat_completions_streaming_mock(client, gateway_headers):
     with client.stream(
         "POST",
         "/v1/chat/completions",
+        headers=gateway_headers,
         json={
             "model": "code-best",
             "messages": [{"role": "user", "content": "hello"}],
@@ -22,9 +23,10 @@ def test_chat_completions_streaming_mock(client):
     assert any(item["inbound_protocol"] == "openai_chat_stream" for item in logs["items"])
 
 
-def test_streaming_unknown_unified_model_returns_error(client):
+def test_streaming_unknown_unified_model_returns_error(client, gateway_headers):
     response = client.post(
         "/v1/chat/completions",
+        headers=gateway_headers,
         json={
             "model": "missing-stream-model",
             "messages": [{"role": "user", "content": "hello"}],
