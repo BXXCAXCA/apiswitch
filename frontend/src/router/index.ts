@@ -7,6 +7,7 @@ import ModelDiscoveryView from '../views/ModelDiscoveryView.vue'
 import RouterHealthView from '../views/RouterHealthView.vue'
 import LogsView from '../views/LogsView.vue'
 import TokensView from '../views/TokensView.vue'
+import SettingsView from '../views/SettingsView.vue'
 import PlaceholderView from '../views/PlaceholderView.vue'
 
 export const router = createRouter({
@@ -24,10 +25,10 @@ export const router = createRouter({
         { path: 'router-health', component: RouterHealthView },
         { path: 'logs', component: LogsView },
         { path: 'tokens', component: TokensView },
+        { path: 'settings', component: SettingsView },
         { path: 'budgets', component: PlaceholderView, props: { title: '预算控制' } },
         { path: 'webdav', component: PlaceholderView, props: { title: 'WebDAV 导入导出' } },
-        { path: 'agents', component: PlaceholderView, props: { title: 'Agent 配置' } },
-        { path: 'settings', component: PlaceholderView, props: { title: '系统设置' } }
+        { path: 'agents', component: PlaceholderView, props: { title: 'Agent 配置' } }
       ]
     }
   ]
