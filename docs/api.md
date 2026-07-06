@@ -2,6 +2,10 @@
 
 ## Gateway
 
+All `/v1/*` gateway endpoints require `Authorization: Bearer <api_token>`.
+
+Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext token is returned only once.
+
 - `POST /v1/chat/completions`
   - Supports non-streaming JSON responses.
   - Supports `stream=true` with `text/event-stream` OpenAI-compatible SSE output.
