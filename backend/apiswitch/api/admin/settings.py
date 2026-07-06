@@ -1,25 +1,20 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from apiswitch.config import settings
+from apiswitch.api.deps import get_db
+from apiswitch.schemas.settings import SettingsResponse, SettingsUpdate
+from apiswitch.services.settings import get_system_settings, list_raw_settings, update_system_settings
 
 router = APIRouter(prefix="/api/admin/settings", tags=["Admin - Settings"])
 
-_RUNTIME_SETTINGS = {
-    "listen_host": settings.listen_host,
-    "port": settings.port,
-    "auth_enabled": settings.auth_enabled,
-    "stream_failure_mode": settings.stream_failure_mode,
-    "record_full_request": False,
-    "record_full_response": False,
-}
-
 
 @router.get("")
-async def get_settings() -> dict:
-    return _RUNTIME_SETTINGS
+async def get_settings(db: Session = Depends(get_db)) -> SettingsResponse:
+    return SettingsResponse(settings=get_system_settings(db), raw=list_raw_settings(db))
 
 
 @router.patch("")
-async def update_settings(payload: dict) -> dict:
-    _RUNTIME_SETTINGS.update(payload)
-    return _RUNTIME_SETTINGS
+async def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db)) -> SettingsResponse:
+    values = payload.model_dump(exclude_unset=True)
+    settings = update_system_settings(db, values)
+    return SettingsResponse(settings=settings, raw=list_raw_settings(db))
