@@ -4,6 +4,21 @@ APISwitch is a local-first AI API gateway and model router.
 
 Current milestone: `v0.2.0-core-gateway` in progress.
 
+## Handoff documents
+
+For continuing development in a new conversation, read these first:
+
+- `docs/hand-off-context.md` - project context, requirements, architecture, current state, caveats, and next tasks.
+- `docs/conversation-archive.md` - chronological archive of the available conversation and development history.
+- `docs/development-plan.md` - milestone progress and remaining work.
+- `docs/api.md` - current gateway and admin API list.
+
+Suggested prompt for a new conversation:
+
+```text
+请先阅读 BXXCAXCA/apiswitch 仓库中的 docs/hand-off-context.md、docs/conversation-archive.md、docs/development-plan.md、docs/api.md 和 README.md，然后继续 APISwitch 开发。默认直接提交到 main；回答用中文；不要重复询问已确定需求。优先进入质量修复阶段：跑通/修复 pytest、npm run test、npm run build，然后继续做 Responses streaming、WebDAV 同步和 Agent 备份恢复。
+```
+
 ## Tech stack
 
 - Backend: Python 3.11+, FastAPI, SQLAlchemy, Alembic, SQLite
