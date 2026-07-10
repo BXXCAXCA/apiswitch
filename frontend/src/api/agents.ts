@@ -38,6 +38,29 @@ export interface AgentConfigCheckResult {
   config_exists: boolean
 }
 
+export interface ClaudeCodeProfileWriteRequest {
+  profile_name: string
+  base_url: string
+  model: string
+  effort_level?: string | null
+  max_output_tokens?: number | null
+  auto_compact_window?: number | null
+  dry_run: boolean
+}
+
+export interface ClaudeCodeProfileWriteResult {
+  ok: boolean
+  profile_name: string
+  config_dir: string
+  settings_path: string
+  backup_path: string | null
+  written: boolean
+  settings: Record<string, unknown>
+  powershell_command: string
+  posix_command: string
+  message: string
+}
+
 export function fetchAgents() {
   return getJson<AgentConfig[]>('/api/admin/agents')
 }
@@ -56,4 +79,8 @@ export function deleteAgent(agentId: number) {
 
 export function checkAgent(agentId: number) {
   return postJson<AgentConfigCheckResult>(`/api/admin/agents/${agentId}/check`, {})
+}
+
+export function writeClaudeCodeProfile(payload: ClaudeCodeProfileWriteRequest) {
+  return postJson<ClaudeCodeProfileWriteResult>('/api/admin/agents/claude-code/write', payload)
 }
