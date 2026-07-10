@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import ProvidersView from '../views/ProvidersView.vue'
+import ProviderConnectionsView from '../views/ProviderConnectionsView.vue'
 import UnifiedModelsView from '../views/UnifiedModelsView.vue'
 import ModelDiscoveryView from '../views/ModelDiscoveryView.vue'
 import RouterHealthView from '../views/RouterHealthView.vue'
@@ -22,6 +23,7 @@ export const router = createRouter({
         { path: '', redirect: '/dashboard' },
         { path: 'dashboard', component: DashboardView },
         { path: 'providers', component: ProvidersView },
+        { path: 'provider-connections', component: ProviderConnectionsView },
         { path: 'unified-models', component: UnifiedModelsView },
         { path: 'model-discovery', component: ModelDiscoveryView },
         { path: 'router-health', component: RouterHealthView },
