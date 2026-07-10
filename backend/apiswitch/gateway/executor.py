@@ -13,10 +13,16 @@ from apiswitch.providers.factory import build_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
+from apiswitch.services.usage_accounting import record_usage_history
 
 
 class GatewayExecutor:
-    async def execute_chat_completion(self, request: ChatCompletionRequest, db: Session) -> dict:
+    async def execute_chat_completion(
+        self,
+        request: ChatCompletionRequest,
+        db: Session,
+        api_token_id: int | None = None,
+    ) -> dict:
         started_at = datetime.utcnow()
         start_time = time.perf_counter()
         request_id = f"req_{uuid.uuid4().hex}"
@@ -71,8 +77,22 @@ class GatewayExecutor:
                     log.latency_ms = total_latency_ms
                     log.retry_chain_json = {"attempts": attempts}
                     usage = response.get("usage", {})
-                    log.input_tokens = usage.get("prompt_tokens")
-                    log.output_tokens = usage.get("completion_tokens")
+                    input_tokens = usage.get("prompt_tokens")
+                    output_tokens = usage.get("completion_tokens")
+                    log.input_tokens = input_tokens
+                    log.output_tokens = output_tokens
+                    _, estimated_cost = record_usage_history(
+                        db,
+                        request_id=request_id,
+                        api_token_id=api_token_id,
+                        provider_connection_id=None,
+                        provider_id=selected.provider_id,
+                        unified_model=request.model,
+                        upstream_model=selected.upstream_model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
+                    log.estimated_cost = estimated_cost
                     db.commit()
 
                     response["model"] = request.model
@@ -84,7 +104,9 @@ class GatewayExecutor:
                             "upstream_model": selected.upstream_model,
                             "candidate_id": selected.candidate_id,
                             "score": selected.score,
+                            "score_breakdown": selected.score_breakdown,
                             "latency_ms": round(total_latency_ms, 2),
+                            "estimated_cost": estimated_cost,
                             "retry_chain": attempts,
                         }
                     )
@@ -121,7 +143,12 @@ class GatewayExecutor:
             db.commit()
             raise
 
-    async def execute_messages(self, request: AnthropicMessagesRequest, db: Session) -> dict:
+    async def execute_messages(
+        self,
+        request: AnthropicMessagesRequest,
+        db: Session,
+        api_token_id: int | None = None,
+    ) -> dict:
         start_time = time.perf_counter()
         request_id = f"req_{uuid.uuid4().hex}"
         last_error: Exception | None = None
@@ -174,8 +201,22 @@ class GatewayExecutor:
                     log.latency_ms = total_latency_ms
                     log.retry_chain_json = {"attempts": attempts}
                     usage = response.get("usage", {})
-                    log.input_tokens = usage.get("input_tokens")
-                    log.output_tokens = usage.get("output_tokens")
+                    input_tokens = usage.get("input_tokens")
+                    output_tokens = usage.get("output_tokens")
+                    log.input_tokens = input_tokens
+                    log.output_tokens = output_tokens
+                    _, estimated_cost = record_usage_history(
+                        db,
+                        request_id=request_id,
+                        api_token_id=api_token_id,
+                        provider_connection_id=None,
+                        provider_id=selected.provider_id,
+                        unified_model=request.model,
+                        upstream_model=selected.upstream_model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
+                    log.estimated_cost = estimated_cost
                     db.commit()
 
                     response["model"] = request.model
@@ -187,7 +228,9 @@ class GatewayExecutor:
                             "upstream_model": selected.upstream_model,
                             "candidate_id": selected.candidate_id,
                             "score": selected.score,
+                            "score_breakdown": selected.score_breakdown,
                             "latency_ms": round(total_latency_ms, 2),
+                            "estimated_cost": estimated_cost,
                             "retry_chain": attempts,
                         }
                     )
@@ -262,6 +305,7 @@ class GatewayExecutor:
                         "upstream_model": selected.upstream_model,
                         "candidate_id": selected.candidate_id,
                         "score": selected.score,
+                        "score_breakdown": selected.score_breakdown,
                     }
                     async for chunk in rewrite_openai_sse_model(
                         provider.stream_chat(upstream_request),
