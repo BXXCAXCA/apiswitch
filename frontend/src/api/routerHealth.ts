@@ -1,5 +1,12 @@
 import { getJson } from './client'
 
+export interface ScoreBreakdown {
+  mode: string
+  factors: Record<string, number>
+  weighted_factors: Record<string, number>
+  penalties: Record<string, number>
+}
+
 export interface RouterHealthItem {
   unified_model: string
   candidate_id: number
@@ -9,6 +16,7 @@ export interface RouterHealthItem {
   enabled: boolean
   available: boolean
   score: number
+  score_breakdown: ScoreBreakdown | null
   success_count: number
   failure_count: number
   consecutive_failures: number
