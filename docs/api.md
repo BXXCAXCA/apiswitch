@@ -19,6 +19,26 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
   - Routes unified model names to candidate upstream models through APISwitch.
 - `GET /v1/models`
 
+### Planned protocol expansion
+
+The following routes are planned and are not yet implemented unless stated otherwise:
+
+- Responses streaming
+- Embeddings
+- Gemini `v1beta`
+- WebSocket bridge
+- Files
+- Images generations / edits
+- Audio speech / transcriptions
+- Moderations
+- Rerank
+- Search
+- Batches
+- Video
+- Music
+
+See `docs/omniroute-inspired-roadmap.md` for the implementation order and unified routing requirements.
+
 ## Admin
 
 ### Dashboard
@@ -35,6 +55,8 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
 - `POST /api/admin/providers/{provider_id}/test`
 - `POST /api/admin/providers/{provider_id}/discover-models`
 - `GET /api/admin/providers/{provider_id}/models`
+
+Provider Connection, OAuth account, Provider Node, pricing, quota, and usage APIs are planned. Their database foundation is present, but the CRUD and routing integration are not yet implemented.
 
 ### Unified Models
 
@@ -86,6 +108,12 @@ Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext t
 - `PATCH /api/admin/agents/{agent_id}`
 - `DELETE /api/admin/agents/{agent_id}`
 - `POST /api/admin/agents/{agent_id}/check`
+- `POST /api/admin/agents/claude-code/write`
+  - Previews or writes `~/.claude/profiles/<profile>/settings.json`.
+  - Backs up an existing settings file before replacing it.
+  - Writes APISwitch Base URL and Unified Model configuration.
+  - Never writes `ANTHROPIC_AUTH_TOKEN` to disk.
+  - Returns PowerShell and POSIX launch commands that inject the token at startup.
 
 ### Settings
 
