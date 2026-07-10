@@ -40,6 +40,50 @@ class ProviderModel(Base, TimestampMixin):
     provider: Mapped[Provider] = relationship(back_populates="models")
 
 
+class ProviderConnection(Base, TimestampMixin):
+    __tablename__ = "provider_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    auth_type: Mapped[str] = mapped_column(String(32), default="api_key")
+    account_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    credential_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class ProviderNode(Base, TimestampMixin):
+    __tablename__ = "provider_nodes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), index=True)
+    connection_id: Mapped[int | None] = mapped_column(ForeignKey("provider_connections.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    base_url: Mapped[str] = mapped_column(String(512))
+    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    weight: Mapped[int] = mapped_column(Integer, default=100)
+    capabilities_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class ModelPricing(Base, TimestampMixin):
+    __tablename__ = "model_pricing"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_id: Mapped[int | None] = mapped_column(ForeignKey("providers.id"), nullable=True, index=True)
+    model_name: Mapped[str] = mapped_column(String(256), index=True)
+    input_cost_per_million: Mapped[float | None] = mapped_column(Float, nullable=True)
+    output_cost_per_million: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cached_input_cost_per_million: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(16), default="USD")
+    effective_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class UnifiedModel(Base, TimestampMixin):
     __tablename__ = "unified_models"
 
@@ -120,6 +164,52 @@ class RequestLog(Base):
     cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     debug_request_body_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     debug_response_body_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class QuotaSnapshot(Base):
+    __tablename__ = "quota_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider_connection_id: Mapped[int] = mapped_column(ForeignKey("provider_connections.id"), index=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    remaining_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    remaining_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    remaining_credit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+
+class UsageHistory(Base):
+    __tablename__ = "usage_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(128), index=True)
+    api_token_id: Mapped[int | None] = mapped_column(ForeignKey("api_tokens.id"), nullable=True, index=True)
+    provider_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_connections.id"), nullable=True, index=True
+    )
+    unified_model: Mapped[str] = mapped_column(String(128), index=True)
+    upstream_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class SessionAffinity(Base):
+    __tablename__ = "session_affinity"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_key: Mapped[str] = mapped_column(String(256), unique=True, index=True)
+    unified_model_id: Mapped[int] = mapped_column(ForeignKey("unified_models.id"), index=True)
+    candidate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("unified_model_candidates.id"), nullable=True, index=True
+    )
+    provider_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_connections.id"), nullable=True, index=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ApiToken(Base, TimestampMixin):
