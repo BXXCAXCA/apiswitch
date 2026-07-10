@@ -11,6 +11,60 @@ DEFAULT_SCORE_WEIGHTS = {
     "manual_priority": 0.05,
 }
 
+TIER_SCORE_WEIGHTS = {
+    "balanced": DEFAULT_SCORE_WEIGHTS,
+    "fast": {
+        "health": 0.25,
+        "quota": 0.10,
+        "cost": 0.05,
+        "latency": 0.30,
+        "task_fit": 0.10,
+        "context_fit": 0.05,
+        "stability": 0.10,
+        "manual_priority": 0.05,
+    },
+    "cheap": {
+        "health": 0.15,
+        "quota": 0.20,
+        "cost": 0.35,
+        "latency": 0.08,
+        "task_fit": 0.07,
+        "context_fit": 0.05,
+        "stability": 0.05,
+        "manual_priority": 0.05,
+    },
+    "free": {
+        "health": 0.15,
+        "quota": 0.25,
+        "cost": 0.30,
+        "latency": 0.08,
+        "task_fit": 0.07,
+        "context_fit": 0.05,
+        "stability": 0.05,
+        "manual_priority": 0.05,
+    },
+    "quality": {
+        "health": 0.20,
+        "quota": 0.08,
+        "cost": 0.05,
+        "latency": 0.07,
+        "task_fit": 0.25,
+        "context_fit": 0.15,
+        "stability": 0.15,
+        "manual_priority": 0.05,
+    },
+    "reliable": {
+        "health": 0.35,
+        "quota": 0.15,
+        "cost": 0.05,
+        "latency": 0.10,
+        "task_fit": 0.08,
+        "context_fit": 0.07,
+        "stability": 0.15,
+        "manual_priority": 0.05,
+    },
+}
+
 
 @dataclass(frozen=True)
 class CandidateScoreInput:
@@ -35,6 +89,13 @@ class CandidateScoreResult:
     weighted_factors: dict[str, float]
     penalties: dict[str, float]
     mode: str
+
+
+def get_tier_score_weights(tier: str | None) -> tuple[str, dict[str, float]]:
+    normalized = (tier or "balanced").strip().lower()
+    if normalized not in TIER_SCORE_WEIGHTS:
+        normalized = "balanced"
+    return normalized, dict(TIER_SCORE_WEIGHTS[normalized])
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
@@ -106,10 +167,7 @@ def calculate_score_details(
             else item.manual_priority_adjustment * 100.0
         ),
     }
-    weighted_factors = {
-        name: factors[name] * resolved_weights[name]
-        for name in DEFAULT_SCORE_WEIGHTS
-    }
+    weighted_factors = {name: factors[name] * resolved_weights[name] for name in DEFAULT_SCORE_WEIGHTS}
     penalties = {
         "failure": max(0.0, item.failure_penalty),
         "budget": max(0.0, item.budget_penalty),
