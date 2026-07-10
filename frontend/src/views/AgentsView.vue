@@ -3,10 +3,54 @@
     <n-h1>Agent 配置</n-h1>
 
     <n-alert type="info">
-      当前阶段用于记录本机 Agent 配置路径和备份状态；后续会接入实际导入、导出和同步流程。
+      Claude Code 已支持生成独立 Profile。配置文件不会保存 API Token，启动时通过 ANTHROPIC_AUTH_TOKEN 注入。
     </n-alert>
 
-    <n-card title="新增 Agent 配置">
+    <n-card title="Claude Code Profile 写入">
+      <n-form :model="claudeForm" label-placement="left" label-width="150">
+        <n-grid :cols="2" :x-gap="16" :y-gap="12">
+          <n-form-item-gi label="Profile 名称">
+            <n-input v-model:value="claudeForm.profile_name" placeholder="apiswitch" />
+          </n-form-item-gi>
+          <n-form-item-gi label="APISwitch Base URL">
+            <n-input v-model:value="claudeForm.base_url" placeholder="http://127.0.0.1:8080" />
+          </n-form-item-gi>
+          <n-form-item-gi label="统一模型">
+            <n-input v-model:value="claudeForm.model" placeholder="code-best" />
+          </n-form-item-gi>
+          <n-form-item-gi label="推理强度">
+            <n-select v-model:value="claudeForm.effort_level" clearable :options="effortOptions" />
+          </n-form-item-gi>
+          <n-form-item-gi label="最大输出 Token">
+            <n-input-number v-model:value="claudeForm.max_output_tokens" :min="1" clearable />
+          </n-form-item-gi>
+          <n-form-item-gi label="自动压缩窗口">
+            <n-input-number v-model:value="claudeForm.auto_compact_window" :min="1" clearable />
+          </n-form-item-gi>
+        </n-grid>
+        <n-space>
+          <n-button :loading="writingClaude" @click="handleClaudeCode(true)">预览配置</n-button>
+          <n-button type="primary" :loading="writingClaude" @click="handleClaudeCode(false)">写入 Profile</n-button>
+        </n-space>
+      </n-form>
+
+      <n-alert v-if="claudeResult" :type="claudeResult.written ? 'success' : 'info'" style="margin-top: 16px">
+        <n-space vertical>
+          <div><strong>{{ claudeResult.message }}</strong></div>
+          <div>配置目录：{{ claudeResult.config_dir }}</div>
+          <div>配置文件：{{ claudeResult.settings_path }}</div>
+          <div v-if="claudeResult.backup_path">原配置备份：{{ claudeResult.backup_path }}</div>
+          <div>PowerShell 启动命令：</div>
+          <n-code :code="claudeResult.powershell_command" word-wrap />
+          <div>POSIX 启动命令：</div>
+          <n-code :code="claudeResult.posix_command" word-wrap />
+          <div>settings.json：</div>
+          <n-code :code="claudeSettingsText" language="json" word-wrap />
+        </n-space>
+      </n-alert>
+    </n-card>
+
+    <n-card title="手动新增 Agent 配置">
       <n-form :model="form" label-placement="left" label-width="120">
         <n-grid :cols="2" :x-gap="16" :y-gap="12">
           <n-form-item-gi label="Agent 类型"><n-select v-model:value="form.agent_type" :options="agentTypeOptions" /></n-form-item-gi>
@@ -26,16 +70,62 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
-import { NAlert, NButton, NCard, NDataTable, NForm, NFormItemGi, NGrid, NH1, NInput, NPopconfirm, NSelect, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
-import { checkAgent, createAgent, deleteAgent, fetchAgents, updateAgent, type AgentConfig } from '../api/agents'
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NCard,
+  NCode,
+  NDataTable,
+  NForm,
+  NFormItemGi,
+  NGrid,
+  NH1,
+  NInput,
+  NInputNumber,
+  NPopconfirm,
+  NSelect,
+  NSpace,
+  NSwitch,
+  NTag,
+  useMessage
+} from 'naive-ui'
+import {
+  checkAgent,
+  createAgent,
+  deleteAgent,
+  fetchAgents,
+  updateAgent,
+  writeClaudeCodeProfile,
+  type AgentConfig,
+  type ClaudeCodeProfileWriteResult
+} from '../api/agents'
 
 const message = useMessage()
 const agents = ref<AgentConfig[]>([])
 const loading = ref(false)
 const saving = ref(false)
+const writingClaude = ref(false)
 const checkingId = ref<number | null>(null)
 const updatingId = ref<number | null>(null)
+const claudeResult = ref<ClaudeCodeProfileWriteResult | null>(null)
+const claudeSettingsText = computed(() => JSON.stringify(claudeResult.value?.settings ?? {}, null, 2))
+
+const claudeForm = reactive({
+  profile_name: 'apiswitch',
+  base_url: 'http://127.0.0.1:8080',
+  model: 'code-best',
+  effort_level: null as string | null,
+  max_output_tokens: null as number | null,
+  auto_compact_window: null as number | null
+})
+const effortOptions = [
+  { label: 'low', value: 'low' },
+  { label: 'medium', value: 'medium' },
+  { label: 'high', value: 'high' },
+  { label: 'xhigh', value: 'xhigh' }
+]
+
 const form = reactive({
   agent_type: 'claude-code',
   config_path: '',
@@ -101,6 +191,31 @@ async function loadAgents() {
     agents.value = await fetchAgents()
   } finally {
     loading.value = false
+  }
+}
+
+async function handleClaudeCode(dryRun: boolean) {
+  if (!claudeForm.profile_name || !claudeForm.base_url || !claudeForm.model) {
+    message.warning('请填写 Profile 名称、Base URL 和统一模型')
+    return
+  }
+  writingClaude.value = true
+  try {
+    claudeResult.value = await writeClaudeCodeProfile({
+      profile_name: claudeForm.profile_name,
+      base_url: claudeForm.base_url,
+      model: claudeForm.model,
+      effort_level: claudeForm.effort_level,
+      max_output_tokens: claudeForm.max_output_tokens,
+      auto_compact_window: claudeForm.auto_compact_window,
+      dry_run: dryRun
+    })
+    message.success(dryRun ? 'Claude Code 配置预览已生成' : 'Claude Code Profile 已写入')
+    if (!dryRun) await loadAgents()
+  } catch (error) {
+    message.error(`Claude Code 配置失败：${error instanceof Error ? error.message : '未知错误'}`)
+  } finally {
+    writingClaude.value = false
   }
 }
 
