@@ -41,8 +41,21 @@ class AnthropicMessagesRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
 
 
+class EmbeddingsRequest(BaseModel):
+    model: str
+    input: Any
+    encoding_format: Literal["float", "base64"] | None = None
+    dimensions: int | None = Field(default=None, ge=1)
+    user: str | None = None
+
+
 class NormalizedRequest(BaseModel):
-    inbound_protocol: Literal["openai_chat", "openai_responses", "anthropic_messages"]
+    inbound_protocol: Literal[
+        "openai_chat",
+        "openai_responses",
+        "anthropic_messages",
+        "openai_embeddings",
+    ]
     model: str
     messages: list[ChatMessage]
     stream: bool = False
