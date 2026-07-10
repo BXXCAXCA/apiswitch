@@ -10,6 +10,7 @@ import LogsView from '../views/LogsView.vue'
 import TokensView from '../views/TokensView.vue'
 import SettingsView from '../views/SettingsView.vue'
 import BudgetsView from '../views/BudgetsView.vue'
+import AccountingView from '../views/AccountingView.vue'
 import WebDAVView from '../views/WebDAVView.vue'
 import AgentsView from '../views/AgentsView.vue'
 
@@ -28,6 +29,7 @@ export const router = createRouter({
         { path: 'model-discovery', component: ModelDiscoveryView },
         { path: 'router-health', component: RouterHealthView },
         { path: 'logs', component: LogsView },
+        { path: 'accounting', component: AccountingView },
         { path: 'tokens', component: TokensView },
         { path: 'settings', component: SettingsView },
         { path: 'budgets', component: BudgetsView },
