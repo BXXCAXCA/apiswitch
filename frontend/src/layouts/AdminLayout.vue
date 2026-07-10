@@ -26,6 +26,7 @@ const menuOptions = [
   { label: label('模型发现', '/model-discovery'), key: '/model-discovery' },
   { label: label('路由状态', '/router-health'), key: '/router-health' },
   { label: label('调用日志', '/logs'), key: '/logs' },
+  { label: label('价格与用量', '/accounting'), key: '/accounting' },
   { label: label('预算控制', '/budgets'), key: '/budgets' },
   { label: label('Tokens', '/tokens'), key: '/tokens' },
   { label: label('WebDAV', '/webdav'), key: '/webdav' },
