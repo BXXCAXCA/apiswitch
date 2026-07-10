@@ -13,6 +13,8 @@ from apiswitch.providers.factory import build_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
+from apiswitch.services.routing_controls import estimate_token_count
+from apiswitch.services.session_affinity import record_session_affinity
 from apiswitch.services.usage_accounting import record_usage_history
 
 
@@ -22,6 +24,9 @@ class GatewayExecutor:
         request: ChatCompletionRequest,
         db: Session,
         api_token_id: int | None = None,
+        session_key: str | None = None,
+        tier: str | None = None,
+        max_cost: float | None = None,
     ) -> dict:
         started_at = datetime.utcnow()
         start_time = time.perf_counter()
@@ -41,8 +46,19 @@ class GatewayExecutor:
         db.add(log)
         db.flush()
 
+        estimated_input_tokens = estimate_token_count([message.model_dump() for message in request.messages])
+        estimated_output_tokens = request.max_tokens or 1024
+
         try:
-            candidates = list_ranked_candidates(db, request.model)
+            candidates = list_ranked_candidates(
+                db,
+                request.model,
+                session_key=session_key,
+                tier=tier,
+                max_cost=max_cost,
+                estimated_input_tokens=estimated_input_tokens,
+                estimated_output_tokens=estimated_output_tokens,
+            )
             for selected in candidates:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
@@ -59,6 +75,12 @@ class GatewayExecutor:
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
+                    record_session_affinity(
+                        db,
+                        unified_model_name=request.model,
+                        session_key=session_key,
+                        candidate_id=selected.candidate_id,
+                    )
 
                     attempts.append(
                         {
@@ -107,6 +129,12 @@ class GatewayExecutor:
                             "score_breakdown": selected.score_breakdown,
                             "latency_ms": round(total_latency_ms, 2),
                             "estimated_cost": estimated_cost,
+                            "estimated_request_cost": selected.estimated_request_cost,
+                            "request_controls": {
+                                "tier": tier or "balanced",
+                                "budget": max_cost,
+                                "session_affinity": bool(session_key),
+                            },
                             "retry_chain": attempts,
                         }
                     )
@@ -148,6 +176,9 @@ class GatewayExecutor:
         request: AnthropicMessagesRequest,
         db: Session,
         api_token_id: int | None = None,
+        session_key: str | None = None,
+        tier: str | None = None,
+        max_cost: float | None = None,
     ) -> dict:
         start_time = time.perf_counter()
         request_id = f"req_{uuid.uuid4().hex}"
@@ -166,8 +197,23 @@ class GatewayExecutor:
         db.add(log)
         db.flush()
 
+        estimated_input_tokens = estimate_token_count(
+            {
+                "system": request.system,
+                "messages": [message.model_dump() for message in request.messages],
+            }
+        )
+
         try:
-            candidates = list_ranked_candidates(db, request.model)
+            candidates = list_ranked_candidates(
+                db,
+                request.model,
+                session_key=session_key,
+                tier=tier,
+                max_cost=max_cost,
+                estimated_input_tokens=estimated_input_tokens,
+                estimated_output_tokens=request.max_tokens,
+            )
             for selected in candidates:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
@@ -184,6 +230,12 @@ class GatewayExecutor:
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
+                    record_session_affinity(
+                        db,
+                        unified_model_name=request.model,
+                        session_key=session_key,
+                        candidate_id=selected.candidate_id,
+                    )
                     attempts.append(
                         {
                             "candidate_id": selected.candidate_id,
@@ -231,6 +283,12 @@ class GatewayExecutor:
                             "score_breakdown": selected.score_breakdown,
                             "latency_ms": round(total_latency_ms, 2),
                             "estimated_cost": estimated_cost,
+                            "estimated_request_cost": selected.estimated_request_cost,
+                            "request_controls": {
+                                "tier": tier or "balanced",
+                                "budget": max_cost,
+                                "session_affinity": bool(session_key),
+                            },
                             "retry_chain": attempts,
                         }
                     )
@@ -265,7 +323,14 @@ class GatewayExecutor:
             db.commit()
             raise
 
-    async def stream_chat_completion(self, request: ChatCompletionRequest, db: Session) -> AsyncIterator[bytes]:
+    async def stream_chat_completion(
+        self,
+        request: ChatCompletionRequest,
+        db: Session,
+        session_key: str | None = None,
+        tier: str | None = None,
+        max_cost: float | None = None,
+    ) -> AsyncIterator[bytes]:
         started_at = datetime.utcnow()
         start_time = time.perf_counter()
         request_id = f"req_{uuid.uuid4().hex}"
@@ -281,7 +346,17 @@ class GatewayExecutor:
         )
         db.add(log)
         db.flush()
-        candidates = list_ranked_candidates(db, request.model)
+        estimated_input_tokens = estimate_token_count([message.model_dump() for message in request.messages])
+        estimated_output_tokens = request.max_tokens or 1024
+        candidates = list_ranked_candidates(
+            db,
+            request.model,
+            session_key=session_key,
+            tier=tier,
+            max_cost=max_cost,
+            estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=estimated_output_tokens,
+        )
 
         async def generator() -> AsyncIterator[bytes]:
             last_error: ProviderError | None = None
@@ -306,6 +381,12 @@ class GatewayExecutor:
                         "candidate_id": selected.candidate_id,
                         "score": selected.score,
                         "score_breakdown": selected.score_breakdown,
+                        "estimated_request_cost": selected.estimated_request_cost,
+                        "request_controls": {
+                            "tier": tier or "balanced",
+                            "budget": max_cost,
+                            "session_affinity": bool(session_key),
+                        },
                     }
                     async for chunk in rewrite_openai_sse_model(
                         provider.stream_chat(upstream_request),
@@ -318,6 +399,12 @@ class GatewayExecutor:
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
+                    record_session_affinity(
+                        db,
+                        unified_model_name=request.model,
+                        session_key=session_key,
+                        candidate_id=selected.candidate_id,
+                    )
                     attempts.append(
                         {
                             "candidate_id": selected.candidate_id,
