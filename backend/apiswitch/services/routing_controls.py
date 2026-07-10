@@ -1,6 +1,8 @@
 import json
 from typing import Any
 
+ALLOWED_ROUTING_TIERS = {"balanced", "fast", "cheap", "free", "quality", "reliable"}
+
 
 def estimate_token_count(value: Any) -> int:
     if value is None:
@@ -23,3 +25,13 @@ def validate_request_budget(value: float | None) -> float | None:
     if value <= 0:
         raise ValueError("X-APISwitch-Budget must be greater than zero")
     return value
+
+
+def validate_routing_tier(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip().lower()
+    if normalized not in ALLOWED_ROUTING_TIERS:
+        allowed = ", ".join(sorted(ALLOWED_ROUTING_TIERS))
+        raise ValueError(f"X-APISwitch-Tier must be one of: {allowed}")
+    return normalized
