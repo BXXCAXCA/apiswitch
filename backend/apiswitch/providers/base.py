@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
-from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
+from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest, EmbeddingsRequest
 
 
 class ProviderError(Exception):
@@ -23,6 +23,12 @@ class ProviderAdapter(ABC):
         raise ProviderError(
             f"Anthropic Messages is not supported by provider type: {self.provider_type}",
             "messages_not_supported",
+        )
+
+    async def embeddings(self, request: EmbeddingsRequest) -> dict[str, Any]:
+        raise ProviderError(
+            f"Embeddings is not supported by provider type: {self.provider_type}",
+            "embeddings_not_supported",
         )
 
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
