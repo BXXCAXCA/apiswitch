@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db, require_gateway_token
+from apiswitch.db.models import ApiToken
 from apiswitch.gateway.errors import GatewayError
 from apiswitch.gateway.responses_executor import execute_responses
 from apiswitch.providers.base import ProviderError
@@ -14,10 +15,10 @@ router = APIRouter(prefix="/v1", tags=["Gateway - OpenAI Responses"])
 async def create_response(
     payload: ResponsesRequest,
     db: Session = Depends(get_db),
-    _auth=Depends(require_gateway_token),
+    api_token: ApiToken = Depends(require_gateway_token),
 ) -> dict:
     try:
-        return await execute_responses(payload, db)
+        return await execute_responses(payload, db, api_token_id=api_token.id)
     except GatewayError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
