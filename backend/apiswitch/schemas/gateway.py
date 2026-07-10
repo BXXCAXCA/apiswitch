@@ -49,12 +49,22 @@ class EmbeddingsRequest(BaseModel):
     user: str | None = None
 
 
+class GeminiGenerateContentRequest(BaseModel):
+    contents: list[dict[str, Any]]
+    systemInstruction: dict[str, Any] | None = None
+    generationConfig: dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    toolConfig: dict[str, Any] | None = None
+    safetySettings: list[dict[str, Any]] | None = None
+
+
 class NormalizedRequest(BaseModel):
     inbound_protocol: Literal[
         "openai_chat",
         "openai_responses",
         "anthropic_messages",
         "openai_embeddings",
+        "gemini_v1beta",
     ]
     model: str
     messages: list[ChatMessage]
