@@ -13,6 +13,8 @@ from apiswitch.providers.factory import build_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import ResponsesRequest
+from apiswitch.services.routing_controls import estimate_token_count
+from apiswitch.services.session_affinity import record_session_affinity
 from apiswitch.services.usage_accounting import record_usage_history
 
 
@@ -20,6 +22,9 @@ async def execute_responses(
     request: ResponsesRequest,
     db: Session,
     api_token_id: int | None = None,
+    session_key: str | None = None,
+    tier: str | None = None,
+    max_cost: float | None = None,
 ) -> dict[str, Any]:
     if request.stream:
         raise ProviderError("Responses streaming is not implemented yet", "responses_streaming_not_implemented")
@@ -42,8 +47,24 @@ async def execute_responses(
     db.add(log)
     db.flush()
 
+    estimated_input_tokens = estimate_token_count(
+        {
+            "instructions": request.instructions,
+            "input": request.input,
+        }
+    )
+    estimated_output_tokens = request.max_output_tokens or 1024
+
     try:
-        candidates = list_ranked_candidates(db, request.model)
+        candidates = list_ranked_candidates(
+            db,
+            request.model,
+            session_key=session_key,
+            tier=tier,
+            max_cost=max_cost,
+            estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=estimated_output_tokens,
+        )
         for selected in candidates:
             final_candidate = selected
             attempt_started = time.perf_counter()
@@ -60,6 +81,12 @@ async def execute_responses(
                 attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                 total_latency_ms = (time.perf_counter() - start_time) * 1000
                 record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
+                record_session_affinity(
+                    db,
+                    unified_model_name=request.model,
+                    session_key=session_key,
+                    candidate_id=selected.candidate_id,
+                )
 
                 attempts.append(
                     {
@@ -108,6 +135,12 @@ async def execute_responses(
                         "score_breakdown": selected.score_breakdown,
                         "latency_ms": round(total_latency_ms, 2),
                         "estimated_cost": estimated_cost,
+                        "estimated_request_cost": selected.estimated_request_cost,
+                        "request_controls": {
+                            "tier": tier or "balanced",
+                            "budget": max_cost,
+                            "session_affinity": bool(session_key),
+                        },
                         "retry_chain": attempts,
                         "inbound_protocol": "openai_responses",
                     }
