@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db
 from apiswitch.db.models import AgentConfig
-from apiswitch.schemas.agents import AgentConfigCheckResult, AgentConfigCreate, AgentConfigRead, AgentConfigUpdate
+from apiswitch.schemas.agents import (
+    AgentConfigCheckResult,
+    AgentConfigCreate,
+    AgentConfigRead,
+    AgentConfigUpdate,
+    ClaudeCodeProfileWriteRequest,
+    ClaudeCodeProfileWriteResult,
+)
+from apiswitch.services.claude_code import ClaudeCodeProfileError, write_claude_code_profile
 
 router = APIRouter(prefix="/api/admin/agents", tags=["Admin - Agents"])
 
@@ -81,6 +89,46 @@ async def create_agent(payload: AgentConfigCreate, db: Session = Depends(get_db)
     db.commit()
     db.refresh(agent)
     return _to_read(agent)
+
+
+@router.post("/claude-code/write")
+async def write_claude_code_config(
+    payload: ClaudeCodeProfileWriteRequest,
+    db: Session = Depends(get_db),
+) -> ClaudeCodeProfileWriteResult:
+    try:
+        result = write_claude_code_profile(payload)
+    except ClaudeCodeProfileError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if result.written:
+        agent = db.scalar(
+            select(AgentConfig).where(
+                AgentConfig.agent_type == "claude-code",
+                AgentConfig.config_path == result.settings_path,
+            )
+        )
+        settings = {
+            "enabled": True,
+            "notes": f"Claude Code profile: {result.profile_name}",
+            "profile_name": result.profile_name,
+            "base_url": result.settings["env"]["ANTHROPIC_BASE_URL"],
+            "model": result.settings["model"],
+        }
+        if agent is None:
+            agent = AgentConfig(
+                agent_type="claude-code",
+                config_path=result.settings_path,
+                last_backup_path=result.backup_path,
+                settings_json=settings,
+            )
+            db.add(agent)
+        else:
+            agent.last_backup_path = result.backup_path or agent.last_backup_path
+            agent.settings_json = settings
+        db.commit()
+
+    return result
 
 
 @router.patch("/{agent_id}")
