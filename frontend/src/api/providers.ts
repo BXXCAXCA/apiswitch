@@ -25,6 +25,17 @@ export interface ProviderCreate {
 
 export type ProviderUpdate = Partial<ProviderCreate>
 
+export interface ProviderCatalogItem {
+  type: string
+  display_name: string
+  default_base_url: string
+  auth_methods: string[]
+  protocols: string[]
+  free_tier: boolean
+  quota_query: boolean
+  status: 'implemented' | 'planned'
+}
+
 export interface ProviderConnectionResult {
   provider_id: number
   provider_name: string
@@ -53,6 +64,10 @@ export interface ProviderModel {
   enabled: boolean
   capabilities: string[]
   owned_by?: string | null
+}
+
+export function fetchProviderCatalog() {
+  return getJson<ProviderCatalogItem[]>('/api/admin/provider-catalog')
 }
 
 export function fetchProviders() {
