@@ -1,11 +1,16 @@
+import base64
+import hashlib
 import json
+import math
+import struct
 import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
 from apiswitch.providers.base import ProviderAdapter
-from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
+from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest, EmbeddingsRequest
+from apiswitch.services.routing_controls import estimate_token_count
 
 
 class MockProviderAdapter(ProviderAdapter):
@@ -47,6 +52,34 @@ class MockProviderAdapter(ProviderAdapter):
             "usage": {"input_tokens": 1, "output_tokens": 1},
         }
 
+    async def embeddings(self, request: EmbeddingsRequest) -> dict[str, Any]:
+        values = request.input if isinstance(request.input, list) and all(
+            isinstance(item, str) for item in request.input
+        ) else [request.input]
+        dimensions = request.dimensions or 8
+        data = []
+        for index, value in enumerate(values):
+            source = json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            digest = hashlib.sha256(source).digest()
+            vector = [((digest[position % len(digest)] / 255.0) * 2.0) - 1.0 for position in range(dimensions)]
+            norm = math.sqrt(sum(component * component for component in vector)) or 1.0
+            vector = [round(component / norm, 8) for component in vector]
+            embedding: list[float] | str
+            if request.encoding_format == "base64":
+                binary = b"".join(struct.pack("<f", component) for component in vector)
+                embedding = base64.b64encode(binary).decode("ascii")
+            else:
+                embedding = vector
+            data.append({"object": "embedding", "index": index, "embedding": embedding})
+
+        prompt_tokens = estimate_token_count(request.input)
+        return {
+            "object": "list",
+            "data": data,
+            "model": request.model,
+            "usage": {"prompt_tokens": prompt_tokens, "total_tokens": prompt_tokens},
+        }
+
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
         stream_id = f"chatcmpl_mock_{uuid.uuid4().hex[:12]}"
         created = int(time.time())
@@ -82,5 +115,11 @@ class MockProviderAdapter(ProviderAdapter):
                 "object": "model",
                 "owned_by": "apiswitch",
                 "capabilities": ["text", "vision", "files"],
+            },
+            {
+                "id": "embedding-best",
+                "object": "model",
+                "owned_by": "apiswitch",
+                "capabilities": ["embeddings"],
             },
         ]
