@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from apiswitch.db.models import Provider, ProviderHealth, UnifiedModel, UnifiedModelCandidate
 from apiswitch.gateway.errors import NoAvailableCandidateError, UnifiedModelNotFoundError
 from apiswitch.router.circuit_breaker import is_candidate_allowed
-from apiswitch.router.scoring import CandidateScoreInput, calculate_score
+from apiswitch.router.scoring import CandidateScoreInput, calculate_score_details
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class SelectedCandidate:
     provider_type: str
     upstream_model: str
     score: float
+    score_breakdown: dict[str, float | str | dict[str, float]]
 
 
 def list_ranked_candidates(db: Session, unified_model_name: str) -> list[SelectedCandidate]:
@@ -55,13 +56,22 @@ def list_ranked_candidates(db: Session, unified_model_name: str) -> list[Selecte
         stability = 100.0 if total_count == 0 else (success_count / total_count) * 100.0
         avg_latency = health.avg_latency_ms if health and health.avg_latency_ms else 1000.0
         speed = max(0.0, min(100.0, 100.0 - (avg_latency / 50.0)))
-        failure_penalty = float(health.consecutive_failures * 10) if health else 0.0
-        score = calculate_score(
+        consecutive_failures = health.consecutive_failures if health else 0
+        failure_penalty = float(consecutive_failures * 5)
+
+        result = calculate_score_details(
             CandidateScoreInput(
                 stability_score=stability,
                 speed_score=speed,
-                manual_priority_adjustment=float(candidate.manual_priority) / 100.0,
+                health_score=max(0.0, stability - consecutive_failures * 10.0),
+                quota_score=50.0,
+                cost_score=50.0,
+                latency_score=speed,
+                task_fit_score=50.0,
+                context_fit_score=50.0,
+                manual_priority_score=float(candidate.manual_priority),
                 failure_penalty=failure_penalty,
+                budget_penalty=0.0,
             )
         )
         scored.append(
@@ -71,7 +81,13 @@ def list_ranked_candidates(db: Session, unified_model_name: str) -> list[Selecte
                 provider_name=provider.name,
                 provider_type=provider.type,
                 upstream_model=candidate.upstream_model,
-                score=score,
+                score=result.score,
+                score_breakdown={
+                    "mode": result.mode,
+                    "factors": result.factors,
+                    "weighted_factors": result.weighted_factors,
+                    "penalties": result.penalties,
+                },
             )
         )
 
