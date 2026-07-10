@@ -8,6 +8,7 @@ from apiswitch.api.admin import (
     budgets,
     dashboard,
     logs,
+    provider_connections,
     providers,
     router_health,
     settings as admin_settings,
@@ -33,6 +34,10 @@ def create_app() -> FastAPI:
             {"name": "Gateway - Models", "description": "Gateway-visible model listing."},
             {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
             {"name": "Admin - Providers", "description": "Provider management."},
+            {
+                "name": "Admin - Provider Connections",
+                "description": "Multi-account credentials and provider node management.",
+            },
             {"name": "Admin - Unified Models", "description": "Unified model management."},
             {"name": "Admin - Router Health", "description": "Candidate scoring and health state."},
             {"name": "Admin - Logs", "description": "Request logs and statistics."},
@@ -62,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(dashboard.router)
     app.include_router(providers.router)
+    app.include_router(provider_connections.router)
     app.include_router(unified_models.router)
     app.include_router(router_health.router)
     app.include_router(logs.router)
