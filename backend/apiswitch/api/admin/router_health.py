@@ -32,7 +32,7 @@ async def list_router_health(db: Session = Depends(get_db)) -> dict:
     items = []
     for unified_model, candidate, provider, health, breaker in rows:
         ranked = ranked_by_model.get(unified_model.name, [])
-        score = next((item.score for item in ranked if item.candidate_id == candidate.id), None)
+        ranked_item = next((item for item in ranked if item.candidate_id == candidate.id), None)
         allowed = is_candidate_allowed(db, candidate.id) if candidate.enabled and provider.enabled and unified_model.enabled else False
         state = breaker.state if breaker else CircuitState.CLOSED.value
         items.append(
@@ -44,7 +44,8 @@ async def list_router_health(db: Session = Depends(get_db)) -> dict:
                 "upstream_model": candidate.upstream_model,
                 "enabled": candidate.enabled and provider.enabled and unified_model.enabled,
                 "available": allowed,
-                "score": round(score or 0, 2),
+                "score": round(ranked_item.score if ranked_item else 0, 2),
+                "score_breakdown": ranked_item.score_breakdown if ranked_item else None,
                 "success_count": health.success_count if health else 0,
                 "failure_count": health.failure_count if health else 0,
                 "consecutive_failures": health.consecutive_failures if health else 0,
