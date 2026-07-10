@@ -21,6 +21,7 @@ const label = (text: string, path: string) => () => h(RouterLink, { to: path }, 
 const menuOptions = [
   { label: label('仪表盘', '/dashboard'), key: '/dashboard' },
   { label: label('上游平台', '/providers'), key: '/providers' },
+  { label: label('账号与节点', '/provider-connections'), key: '/provider-connections' },
   { label: label('统一模型', '/unified-models'), key: '/unified-models' },
   { label: label('模型发现', '/model-discovery'), key: '/model-discovery' },
   { label: label('路由状态', '/router-health'), key: '/router-health' },
