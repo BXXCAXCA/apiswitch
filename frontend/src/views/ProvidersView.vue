@@ -16,6 +16,13 @@
       </n-form>
     </n-card>
 
+    <n-card title="Provider Catalog">
+      <n-alert type="info" style="margin-bottom: 12px">
+        已实现的 Provider 可以直接创建；规划中的 Provider 已进入扩充路线，但适配器尚未完成。
+      </n-alert>
+      <n-data-table :columns="catalogColumns" :data="catalog" :pagination="{ pageSize: 10 }" />
+    </n-card>
+
     <n-card title="Provider 列表">
       <n-data-table :columns="columns" :data="providers" />
     </n-card>
@@ -40,12 +47,22 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue'
-import { NButton, NCard, NDataTable, NForm, NFormItemGi, NGrid, NH1, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
-import { createProvider, deleteProvider, fetchProviders, updateProvider, type Provider, type ProviderCreate } from '../api/providers'
+import { computed, h, onMounted, reactive, ref } from 'vue'
+import { NAlert, NButton, NCard, NDataTable, NForm, NFormItemGi, NGrid, NH1, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
+import {
+  createProvider,
+  deleteProvider,
+  fetchProviderCatalog,
+  fetchProviders,
+  updateProvider,
+  type Provider,
+  type ProviderCatalogItem,
+  type ProviderCreate
+} from '../api/providers'
 
 const message = useMessage()
 const providers = ref<Provider[]>([])
+const catalog = ref<ProviderCatalogItem[]>([])
 const saving = ref(false)
 const editing = ref(false)
 const editingId = ref<number | null>(null)
@@ -69,12 +86,37 @@ const editForm = reactive<ProviderCreate>({
   proxy_type: null,
   proxy_url: null
 })
-const typeOptions = [
-  { label: 'Mock', value: 'mock' },
-  { label: 'OpenAI', value: 'openai' },
-  { label: 'Anthropic', value: 'anthropic' },
-  { label: 'Gemini', value: 'gemini' },
-  { label: 'OpenAI Compatible', value: 'compatible' }
+const typeOptions = computed(() => catalog.value.map((item) => ({
+  label: item.status === 'implemented' ? item.display_name : `${item.display_name}（规划中）`,
+  value: item.type,
+  disabled: item.status !== 'implemented'
+})))
+const catalogColumns = [
+  { title: 'Provider', key: 'display_name' },
+  { title: '类型', key: 'type' },
+  {
+    title: '状态',
+    key: 'status',
+    render(row: ProviderCatalogItem) {
+      return h(NTag, { size: 'small', type: row.status === 'implemented' ? 'success' : 'warning' }, { default: () => row.status === 'implemented' ? '已实现' : '规划中' })
+    }
+  },
+  { title: '认证', key: 'auth_methods', render: (row: ProviderCatalogItem) => row.auth_methods.join(', ') },
+  { title: '协议', key: 'protocols', render: (row: ProviderCatalogItem) => row.protocols.join(', ') },
+  {
+    title: '免费额度',
+    key: 'free_tier',
+    render(row: ProviderCatalogItem) {
+      return h(NTag, { size: 'small', type: row.free_tier ? 'success' : 'default' }, { default: () => row.free_tier ? '有' : '无/未知' })
+    }
+  },
+  {
+    title: '额度查询',
+    key: 'quota_query',
+    render(row: ProviderCatalogItem) {
+      return h(NTag, { size: 'small', type: row.quota_query ? 'info' : 'default' }, { default: () => row.quota_query ? '支持/计划' : '未计划' })
+    }
+  }
 ]
 const columns = [
   { title: 'ID', key: 'id' },
@@ -115,12 +157,7 @@ const columns = [
 ]
 
 function defaultBaseUrl(type: string) {
-  if (type === 'mock') return 'mock://local'
-  if (type === 'openai') return 'https://api.openai.com/v1'
-  if (type === 'anthropic') return 'https://api.anthropic.com/v1'
-  if (type === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta'
-  if (type === 'compatible') return 'http://127.0.0.1:3000/v1'
-  return ''
+  return catalog.value.find((item) => item.type === type)?.default_base_url ?? ''
 }
 
 function handleCreateTypeChange(value: string) {
@@ -199,5 +236,8 @@ async function handleDelete(row: Provider) {
   }
 }
 
-onMounted(loadProviders)
+onMounted(async () => {
+  const [catalogItems] = await Promise.all([fetchProviderCatalog(), loadProviders()])
+  catalog.value = catalogItems
+})
 </script>
