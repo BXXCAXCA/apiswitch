@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db, require_gateway_token
@@ -7,6 +7,7 @@ from apiswitch.gateway.errors import GatewayError
 from apiswitch.gateway.executor import gateway_executor
 from apiswitch.providers.base import ProviderError
 from apiswitch.schemas.gateway import AnthropicMessagesRequest
+from apiswitch.services.routing_controls import validate_request_budget, validate_routing_tier
 
 router = APIRouter(prefix="/v1", tags=["Gateway - Anthropic Messages"])
 
@@ -16,9 +17,28 @@ async def create_message(
     payload: AnthropicMessagesRequest,
     db: Session = Depends(get_db),
     api_token: ApiToken = Depends(require_gateway_token),
+    session_key: str | None = Header(default=None, alias="X-APISwitch-Session"),
+    routing_tier: str | None = Header(default=None, alias="X-APISwitch-Tier"),
+    request_budget: float | None = Header(default=None, alias="X-APISwitch-Budget"),
 ) -> dict:
     try:
-        return await gateway_executor.execute_messages(payload, db, api_token_id=api_token.id)
+        tier = validate_routing_tier(routing_tier)
+        budget = validate_request_budget(request_budget)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"type": "invalid_routing_control", "message": str(exc)},
+        ) from exc
+
+    try:
+        return await gateway_executor.execute_messages(
+            payload,
+            db,
+            api_token_id=api_token.id,
+            session_key=session_key,
+            tier=tier,
+            max_cost=budget,
+        )
     except GatewayError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
