@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from apiswitch.providers.base import ProviderAdapter, ProviderError
-from apiswitch.schemas.gateway import ChatCompletionRequest
+from apiswitch.schemas.gateway import ChatCompletionRequest, EmbeddingsRequest
 
 
 class OpenAIProviderAdapter(ProviderAdapter):
@@ -38,6 +38,23 @@ class OpenAIProviderAdapter(ProviderAdapter):
         if response.status_code >= 400:
             raise ProviderError(
                 f"OpenAI chat request failed with status {response.status_code}: {response.text}",
+                "upstream_http_error",
+            )
+        return response.json()
+
+    async def embeddings(self, request: EmbeddingsRequest) -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers=self._headers(),
+                    json=request.model_dump(exclude_none=True),
+                )
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"OpenAI embeddings request failed: {exc}") from exc
+        if response.status_code >= 400:
+            raise ProviderError(
+                f"OpenAI embeddings request failed with status {response.status_code}: {response.text}",
                 "upstream_http_error",
             )
         return response.json()
