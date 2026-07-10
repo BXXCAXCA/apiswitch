@@ -21,7 +21,7 @@ Deliverables:
 
 Status: in progress.
 
-Goal: make OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages pass through the real APISwitch routing pipeline while supporting Mock, OpenAI, OpenAI-Compatible, Anthropic, and Gemini providers.
+Goal: stabilize the existing unified-model gateway and control panel before expanding the provider and protocol surface.
 
 Completed:
 
@@ -50,6 +50,7 @@ Completed:
 - Frontend WebDAV profile management page
 - Agent config admin API with config path checks, enable/disable, backup path tracking, notes, and delete
 - Frontend Agent config management page
+- Claude Code profile preview/write support with backup and safe profile path validation
 - Persistent system settings API backed by SQLite
 - Frontend system settings page
 - Frontend API Token management page
@@ -85,20 +86,90 @@ Completed:
 - Frontend model discovery page connected to backend data
 - Frontend provider creation form with API Key input and provider defaults
 - Frontend unified model and candidate creation forms
-- Tests for provider CRUD, API Key behavior, API tokens, budgets, WebDAV, agents, gateway auth, persistent settings, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
+- Tests for provider CRUD, API Key behavior, API tokens, budgets, WebDAV, agents, Claude Code profiles, gateway auth, persistent settings, provider discovery, duplicate candidates, routed chat completions, streaming chat completions, Responses, Anthropic Messages, Gemini conversion, circuit breaker transitions, and router health
 - Isolated pytest SQLite database
 
-Remaining:
+Remaining stabilization work:
 
-- Expand tests around selector ranking edge cases
+- Run and fix all backend tests
+- Run and fix frontend tests and production build
 - Add Responses streaming conversion
+- Replace placeholder secret encryption
+- Add Admin API authentication or strict local-only protection
 - Connect Agent configs to real import/export backup workflows
 - Connect WebDAV to real import/export sync workflows
 - Connect budgets to real request cost accounting and enforcement
 
+## v0.3.0-unified-auto-routing
+
+Status: foundation started.
+
+Goal: retain Unified Model as the stable client-facing abstraction while adding multi-account Provider Connections, Provider Nodes, Auto-Combo routing, pricing, quotas, usage history, and session affinity.
+
+Foundation completed:
+
+- `provider_connections` database model and migration
+- `provider_nodes` database model and migration
+- `model_pricing` database model and migration
+- `quota_snapshots` database model and migration
+- `usage_history` database model and migration
+- `session_affinity` database model and migration
+- OmniRoute-inspired architecture roadmap documented in `docs/omniroute-inspired-roadmap.md`
+
+Planned Provider work:
+
+- Provider Catalog with auth methods, protocols, free-tier metadata, and default endpoints
+- Provider Connection CRUD for API Key, OAuth, and anonymous connections
+- Provider Node CRUD for region, proxy, endpoint, and weight management
+- Legacy Provider credential migration to a default Provider Connection
+- Initial high-value Provider expansion: Azure OpenAI, Vertex AI, Bedrock, OpenRouter, xAI, Mistral, Cohere, DeepSeek, Groq, Together, Fireworks, SiliconFlow, Qwen, GLM, Kimi, Doubao, and MiniMax
+- Selected OAuth flows rather than implementing OAuth for every Provider
+
+Planned routing work:
+
+- Unified Model routing modes: `static`, `combo`, and `auto`
+- Compact strategy set: priority, weighted, round-robin, least-used, cost-optimized, quota-headroom, and last-known-good
+- Dynamic Auto-Combo candidate pool generated from available Connections and Nodes
+- Category and tier constraints inside Unified Models
+- Session affinity / last-known-good routing
+- Eight-factor explainable score: health, quota, cost, latency, task fit, context fit, stability, and manual priority
+- Request controls: `X-APISwitch-Budget`, `X-APISwitch-Session`, and `X-APISwitch-Tier`
+
+Planned accounting work:
+
+- Pricing catalog and manual overrides
+- Token accounting
+- Usage history aggregation
+- Provider quota polling and snapshots
+- Automatic budget accumulation and enforcement
+- Budget behaviors: reject, fallback-to-free, fallback-to-cheapest, or warn-only
+
+## v0.4.0-protocol-expansion
+
+Status: planned.
+
+Protocol order:
+
+1. Responses streaming
+2. Embeddings
+3. Gemini `v1beta`
+4. WebSocket bridge
+5. Files
+6. Images generations and edits
+7. Audio speech and transcriptions
+8. Moderations
+9. Rerank
+10. Search
+11. Batches
+12. Video
+13. Music
+
+All protocol handlers must translate into a shared internal request/response model and route through a Unified Model.
+
 ## Later milestones
 
-1. Full Web UI management
-2. Files, multimodal, embeddings, cache
-3. WebDAV and Agent configuration
-4. Security, packaging, Docker, Windows release
+1. Docker and Windows desktop/tray packaging
+2. Real WebDAV configuration sync and conflict resolution
+3. Agent backup/restore and one-click CLI configuration
+4. Files, multimodal processing, caches, and optional memory
+5. Security hardening, CI, release automation, and documentation validation
