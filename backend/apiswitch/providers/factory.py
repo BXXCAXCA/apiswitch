@@ -7,6 +7,22 @@ from apiswitch.providers.mock import MockProviderAdapter
 from apiswitch.providers.openai import OpenAIProviderAdapter
 from apiswitch.security.crypto import secret_crypto
 
+OPENAI_COMPATIBLE_PROVIDER_TYPES = {
+    "openrouter",
+    "xai",
+    "mistral",
+    "deepseek",
+    "groq",
+    "together",
+    "fireworks",
+    "siliconflow",
+    "dashscope",
+    "zhipu",
+    "moonshot",
+    "volcengine",
+    "minimax",
+}
+
 
 def _decrypt_api_key(provider: Provider) -> str | None:
     if not provider.api_key_encrypted:
@@ -36,7 +52,7 @@ def build_provider_adapter(provider: Provider) -> ProviderAdapter:
             api_key=api_key,
             timeout_seconds=provider.timeout_seconds,
         )
-    if provider.type == "compatible":
+    if provider.type == "compatible" or provider.type in OPENAI_COMPATIBLE_PROVIDER_TYPES:
         return CompatibleProviderAdapter(
             base_url=provider.base_url,
             api_key=api_key,
