@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,7 @@ from apiswitch.gateway.errors import GatewayError
 from apiswitch.gateway.executor import gateway_executor
 from apiswitch.providers.base import ProviderError
 from apiswitch.schemas.gateway import ChatCompletionRequest
+from apiswitch.services.routing_controls import validate_request_budget, validate_routing_tier
 
 router = APIRouter(prefix="/v1", tags=["Gateway - OpenAI Chat"])
 
@@ -17,16 +18,41 @@ async def create_chat_completion(
     payload: ChatCompletionRequest,
     db: Session = Depends(get_db),
     api_token: ApiToken = Depends(require_gateway_token),
+    session_key: str | None = Header(default=None, alias="X-APISwitch-Session"),
+    routing_tier: str | None = Header(default=None, alias="X-APISwitch-Tier"),
+    request_budget: float | None = Header(default=None, alias="X-APISwitch-Budget"),
 ):
     try:
+        tier = validate_routing_tier(routing_tier)
+        budget = validate_request_budget(request_budget)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"type": "invalid_routing_control", "message": str(exc)},
+        ) from exc
+
+    try:
         if payload.stream:
-            stream = await gateway_executor.stream_chat_completion(payload, db)
+            stream = await gateway_executor.stream_chat_completion(
+                payload,
+                db,
+                session_key=session_key,
+                tier=tier,
+                max_cost=budget,
+            )
             return StreamingResponse(
                 stream,
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-        return await gateway_executor.execute_chat_completion(payload, db, api_token_id=api_token.id)
+        return await gateway_executor.execute_chat_completion(
+            payload,
+            db,
+            api_token_id=api_token.id,
+            session_key=session_key,
+            tier=tier,
+            max_cost=budget,
+        )
     except GatewayError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
