@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from apiswitch.providers.base import ProviderAdapter, ProviderError
-from apiswitch.schemas.gateway import ChatCompletionRequest
+from apiswitch.schemas.gateway import ChatCompletionRequest, EmbeddingsRequest
 
 
 class CompatibleProviderAdapter(ProviderAdapter):
@@ -37,6 +37,19 @@ class CompatibleProviderAdapter(ProviderAdapter):
                 return response.json()
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"Compatible provider chat failed: {exc}") from exc
+
+    async def embeddings(self, request: EmbeddingsRequest) -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers=self._headers(),
+                    json=request.model_dump(exclude_none=True),
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"Compatible provider embeddings failed: {exc}") from exc
 
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
         payload = request.model_dump(exclude_none=True)
