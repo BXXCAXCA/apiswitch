@@ -12,12 +12,40 @@ from apiswitch.router.circuit_breaker import (
     record_breaker_failure,
     record_breaker_success,
 )
-from apiswitch.router.scoring import CandidateScoreInput, calculate_score
+from apiswitch.router.scoring import CandidateScoreInput, calculate_score, calculate_score_details
 
 
 def test_score_uses_default_weights():
     score = calculate_score(CandidateScoreInput(stability_score=100, speed_score=50))
     assert score == 85
+
+
+def test_extended_score_uses_eight_factors():
+    result = calculate_score_details(
+        CandidateScoreInput(
+            stability_score=100,
+            speed_score=50,
+            health_score=100,
+            quota_score=50,
+            cost_score=50,
+            latency_score=50,
+            task_fit_score=50,
+            context_fit_score=50,
+            manual_priority_score=100,
+        )
+    )
+    assert result.mode == "extended"
+    assert result.score == 68.5
+    assert set(result.factors) == {
+        "health",
+        "quota",
+        "cost",
+        "latency",
+        "task_fit",
+        "context_fit",
+        "stability",
+        "manual_priority",
+    }
 
 
 def test_circuit_breaker_opens_after_threshold():
