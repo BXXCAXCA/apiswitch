@@ -1,31 +1,78 @@
-# API Skeleton
+# APISwitch API
 
-## Gateway
+## Gateway authentication
 
-All `/v1/*` gateway endpoints require `Authorization: Bearer <api_token>`.
+All Gateway endpoints require:
+
+```http
+Authorization: Bearer <api_token>
+```
 
 Create an API token from the Web UI or `POST /api/admin/tokens`. The plaintext token is returned only once.
 
+## Unified routing controls
+
+The current text and embedding endpoints support optional per-request controls:
+
+- `X-APISwitch-Tier`
+  - `balanced`
+  - `fast`
+  - `cheap`
+  - `free`
+  - `quality`
+  - `reliable`
+- `X-APISwitch-Budget`
+  - Positive maximum estimated request cost in USD.
+  - Candidates without pricing are excluded when a hard request budget is supplied.
+- `X-APISwitch-Session`
+  - Session affinity key.
+  - APISwitch remembers the last successful candidate for that Unified Model and session.
+
+These controls refine routing inside a Unified Model. They do not bypass the Unified Model abstraction.
+
+## Gateway endpoints
+
+### OpenAI Chat Completions
+
 - `POST /v1/chat/completions`
-  - Supports non-streaming JSON responses.
-  - Supports `stream=true` with `text/event-stream` OpenAI-compatible SSE output.
-  - Routes unified model names to candidate upstream models through APISwitch.
+  - Non-streaming JSON.
+  - `stream=true` OpenAI-compatible SSE.
+  - Unified Model routing, retry chain, Circuit Breaker, Tier, request budget, and session affinity.
+
+### OpenAI Responses
+
 - `POST /v1/responses`
-  - Supports non-streaming OpenAI Responses-compatible JSON responses.
-  - Converts Responses input to Chat Completions internally, then routes through APISwitch.
-  - `stream=true` is currently rejected with `responses_streaming_not_implemented`.
+  - Non-streaming Responses-compatible JSON.
+  - Converts Responses input to the shared Chat execution path.
+  - `stream=true` currently returns `responses_streaming_not_implemented`.
+
+### Anthropic Messages
+
 - `POST /v1/messages`
-  - Supports non-streaming Anthropic Messages-compatible JSON responses.
-  - Routes unified model names to candidate upstream models through APISwitch.
+  - Non-streaming Anthropic Messages-compatible JSON.
+  - Unified Model routing and request controls.
+
+### Embeddings
+
+- `POST /v1/embeddings`
+  - OpenAI-compatible Embeddings request/response.
+  - Supports `float` and `base64` encoding formats when the selected Provider supports them.
+  - Implemented by Mock, OpenAI, and OpenAI-Compatible adapters.
+  - Default development Unified Model: `embedding-best`.
+
+### Gemini v1beta
+
+- `POST /v1beta/models/{unified_model}:generateContent`
+  - Converts Gemini `contents`, `systemInstruction`, and `generationConfig` to the shared Chat execution path.
+  - Returns a Gemini-compatible `candidates` and `usageMetadata` response.
+
+### Models
+
 - `GET /v1/models`
 
-### Planned protocol expansion
-
-The following routes are planned and are not yet implemented unless stated otherwise:
+## Planned protocol expansion
 
 - Responses streaming
-- Embeddings
-- Gemini `v1beta`
 - WebSocket bridge
 - Files
 - Images generations / edits
@@ -37,13 +84,20 @@ The following routes are planned and are not yet implemented unless stated other
 - Video
 - Music
 
-See `docs/omniroute-inspired-roadmap.md` for the implementation order and unified routing requirements.
+See `docs/omniroute-inspired-roadmap.md` for the phased implementation order.
 
-## Admin
+## Admin endpoints
 
 ### Dashboard
 
 - `GET /api/admin/dashboard/summary`
+
+### Provider Catalog
+
+- `GET /api/admin/provider-catalog`
+- `GET /api/admin/provider-catalog/{provider_type}`
+
+The Catalog distinguishes native adapters, generic OpenAI-Compatible adapters, and planned dedicated adapters.
 
 ### Providers
 
@@ -56,7 +110,34 @@ See `docs/omniroute-inspired-roadmap.md` for the implementation order and unifie
 - `POST /api/admin/providers/{provider_id}/discover-models`
 - `GET /api/admin/providers/{provider_id}/models`
 
-Provider Connection, OAuth account, Provider Node, pricing, quota, and usage APIs are planned. Their database foundation is present, but the CRUD and routing integration are not yet implemented.
+### Provider Connections
+
+- `GET /api/admin/providers/{provider_id}/connections`
+- `POST /api/admin/providers/{provider_id}/connections`
+- `PATCH /api/admin/providers/{provider_id}/connections/{connection_id}`
+- `DELETE /api/admin/providers/{provider_id}/connections/{connection_id}`
+
+Credentials and Refresh Tokens are write-only and never returned by the API.
+
+### Provider Nodes
+
+- `GET /api/admin/providers/{provider_id}/nodes`
+- `POST /api/admin/providers/{provider_id}/nodes`
+- `PATCH /api/admin/providers/{provider_id}/nodes/{node_id}`
+- `DELETE /api/admin/providers/{provider_id}/nodes/{node_id}`
+
+### Pricing, quota, and usage
+
+- `GET /api/admin/accounting/pricing`
+- `POST /api/admin/accounting/pricing`
+- `PATCH /api/admin/accounting/pricing/{pricing_id}`
+- `DELETE /api/admin/accounting/pricing/{pricing_id}`
+- `GET /api/admin/accounting/quota-snapshots`
+- `POST /api/admin/accounting/quota-snapshots`
+- `GET /api/admin/accounting/usage`
+- `GET /api/admin/accounting/usage/summary`
+
+Successful non-streaming Chat, Responses, Messages, and Embeddings requests write Usage History. Streaming usage accounting is still pending because SSE usage aggregation is not implemented yet.
 
 ### Unified Models
 
@@ -73,6 +154,7 @@ Provider Connection, OAuth account, Provider Node, pricing, quota, and usage API
 ### Router Health
 
 - `GET /api/admin/router-health`
+  - Includes the explainable score breakdown.
 
 ### Logs
 
@@ -82,7 +164,6 @@ Provider Connection, OAuth account, Provider Node, pricing, quota, and usage API
 
 - `GET /api/admin/tokens`
 - `POST /api/admin/tokens`
-  - Returns the plaintext token only once at creation time.
 - `PATCH /api/admin/tokens/{token_id}`
 - `DELETE /api/admin/tokens/{token_id}`
 
@@ -92,6 +173,8 @@ Provider Connection, OAuth account, Provider Node, pricing, quota, and usage API
 - `POST /api/admin/budgets`
 - `PATCH /api/admin/budgets/{budget_id}`
 - `DELETE /api/admin/budgets/{budget_id}`
+
+Budget CRUD exists. Automatic monthly budget accumulation and enforcement are still pending; per-request hard budget filtering is implemented through `X-APISwitch-Budget`.
 
 ### WebDAV
 
@@ -109,11 +192,9 @@ Provider Connection, OAuth account, Provider Node, pricing, quota, and usage API
 - `DELETE /api/admin/agents/{agent_id}`
 - `POST /api/admin/agents/{agent_id}/check`
 - `POST /api/admin/agents/claude-code/write`
-  - Previews or writes `~/.claude/profiles/<profile>/settings.json`.
-  - Backs up an existing settings file before replacing it.
-  - Writes APISwitch Base URL and Unified Model configuration.
-  - Never writes `ANTHROPIC_AUTH_TOKEN` to disk.
-  - Returns PowerShell and POSIX launch commands that inject the token at startup.
+  - Preview or write an isolated Claude Code Profile.
+  - Back up an existing `settings.json`.
+  - Never write `ANTHROPIC_AUTH_TOKEN` to disk.
 
 ### Settings
 
