@@ -17,7 +17,7 @@ from apiswitch.api.admin import (
     unified_models,
     webdav,
 )
-from apiswitch.api.gateway import chat_completions, messages, models, responses
+from apiswitch.api.gateway import chat_completions, embeddings, messages, models, responses
 from apiswitch.db.bootstrap import init_database
 
 
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
             {"name": "Gateway - OpenAI Chat", "description": "OpenAI Chat Completions compatible API."},
             {"name": "Gateway - OpenAI Responses", "description": "OpenAI Responses compatible API."},
             {"name": "Gateway - Anthropic Messages", "description": "Anthropic Messages compatible API."},
+            {"name": "Gateway - Embeddings", "description": "OpenAI-compatible Embeddings API."},
             {"name": "Gateway - Models", "description": "Gateway-visible model listing."},
             {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
             {"name": "Admin - Providers", "description": "Provider management and catalog."},
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_completions.router)
     app.include_router(responses.router)
     app.include_router(messages.router)
+    app.include_router(embeddings.router)
     app.include_router(models.router)
     app.include_router(dashboard.router)
     app.include_router(provider_catalog.router)
