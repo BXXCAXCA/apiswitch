@@ -8,6 +8,7 @@ from apiswitch.api.admin import (
     budgets,
     dashboard,
     logs,
+    provider_catalog,
     provider_connections,
     providers,
     router_health,
@@ -33,7 +34,7 @@ def create_app() -> FastAPI:
             {"name": "Gateway - Anthropic Messages", "description": "Anthropic Messages compatible API."},
             {"name": "Gateway - Models", "description": "Gateway-visible model listing."},
             {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
-            {"name": "Admin - Providers", "description": "Provider management."},
+            {"name": "Admin - Providers", "description": "Provider management and catalog."},
             {
                 "name": "Admin - Provider Connections",
                 "description": "Multi-account credentials and provider node management.",
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(messages.router)
     app.include_router(models.router)
     app.include_router(dashboard.router)
+    app.include_router(provider_catalog.router)
     app.include_router(providers.router)
     app.include_router(provider_connections.router)
     app.include_router(unified_models.router)
