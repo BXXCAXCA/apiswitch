@@ -12,7 +12,7 @@
 - Conversation language: Chinese is preferred.
 - Current product direction: APISwitch is now an AI API Gateway + Model Router + Control Panel, not only a simple API key manager.
 - Current milestone: `v0.2.0-core-gateway` in progress.
-- Tests and builds: many tests have been added, but the remote ChatGPT/GitHub tool environment has not actually executed `pytest`, `npm run test`, or `npm run build`. Do not claim tests pass until they are run in a real environment.
+- Tests and builds: verified locally on 2026-07-11 with Python 3.13 and Node 23.9.0: backend `pytest backend/tests -q` passed 60 tests; frontend `npm run test` passed 2 tests; frontend `npm run build` passed. Node 23 is outside several frontend dependencies' supported LTS ranges, so use Node 22 LTS or Node 24+ in CI and release environments.
 
 ## Original product goal
 
@@ -379,7 +379,7 @@ All major sidebar pages are now functional rather than placeholders:
 
 ## Current known caveats
 
-- Tests and frontend build have not been run in this ChatGPT/GitHub tool environment.
+- Backend tests, frontend tests, and the frontend production build were run successfully on 2026-07-11. The frontend production build currently emits a chunk-size warning (about 912 KB minified entry chunk); add route-level code splitting as a later performance improvement.
 - `secret_crypto` is still a placeholder encryption boundary:
   - It stores as `stage1-placeholder:<plaintext>`.
   - It should later be replaced by Windows DPAPI, OS keychain, Credential Manager, or `APISWITCH_MASTER_KEY` based encryption.
@@ -397,14 +397,14 @@ All major sidebar pages are now functional rather than placeholders:
 
 ## Most important next tasks
 
-1. Run backend tests locally:
+1. Keep backend tests green in CI:
 
    ```powershell
    cd backend
    pytest
    ```
 
-2. Run frontend tests/build locally:
+2. Keep frontend tests/build green in CI, using a supported Node LTS release:
 
    ```powershell
    cd frontend

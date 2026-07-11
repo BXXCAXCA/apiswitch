@@ -91,14 +91,19 @@ Completed:
 
 Remaining stabilization work:
 
-- Run and fix all backend tests
-- Run and fix frontend tests and production build
 - Add Responses streaming conversion
 - Replace placeholder secret encryption
 - Add Admin API authentication or strict local-only protection
 - Connect Agent configs to real import/export backup workflows
 - Connect WebDAV to real import/export sync workflows
 - Connect budgets to real request cost accounting and enforcement
+
+Validation completed on 2026-07-11:
+
+- Backend `pytest backend/tests -q`: 60 passed.
+- Frontend `npm run test`: 2 passed.
+- Frontend `npm run build`: passed.
+- Frontend dependencies are now version-bounded and locked in `frontend/package-lock.json`; use Node 22 LTS or Node 24+ for CI and releases.
 
 ## v0.3.0-unified-auto-routing
 

@@ -27,7 +27,9 @@ def _get_agent(db: Session, agent_id: int) -> AgentConfig:
 
 
 def _settings(agent: AgentConfig) -> dict:
-    return agent.settings_json or {}
+    # Copy before callers mutate the value. SQLAlchemy's plain JSON column does
+    # not detect in-place changes to the dict returned from the model.
+    return dict(agent.settings_json or {})
 
 
 def _is_mock_path(path: str | None) -> bool:
