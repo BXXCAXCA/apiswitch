@@ -35,11 +35,12 @@ def _model_config(payload: UnifiedModelCreate | UnifiedModelUpdate, existing: di
     if "capabilities" in data:
         result["capabilities"] = data["capabilities"]
     routing = dict(_routing(result))
-    for key in ("routing_mode", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"):
+    for key in ("routing_mode", "combo_strategy", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"):
         if key in data:
             routing[key] = data[key]
     if isinstance(payload, UnifiedModelCreate):
         routing.setdefault("routing_mode", payload.routing_mode)
+        routing.setdefault("combo_strategy", payload.combo_strategy)
         routing.setdefault("category", payload.category)
         routing.setdefault("preferred_tier", payload.preferred_tier)
         routing.setdefault("max_request_cost", payload.max_request_cost)
@@ -165,6 +166,7 @@ def _to_read(db: Session, model: UnifiedModel) -> UnifiedModelRead:
         enabled=model.enabled,
         capabilities=_capabilities(model.capabilities_json),
         routing_mode=routing.get("routing_mode", "static"),
+        combo_strategy=routing.get("combo_strategy", "priority"),
         category=routing.get("category"),
         preferred_tier=routing.get("preferred_tier", "balanced"),
         max_request_cost=routing.get("max_request_cost"),
@@ -213,7 +215,7 @@ async def update_unified_model(
 ) -> UnifiedModelRead:
     model = _get_unified_model(db, model_id)
     data = payload.model_dump(exclude_unset=True)
-    routing_keys = {"routing_mode", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"}
+    routing_keys = {"routing_mode", "combo_strategy", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"}
     if "capabilities" in data or routing_keys & data.keys():
         model.capabilities_json = _model_config(payload, model.capabilities_json)
         data.pop("capabilities", None)

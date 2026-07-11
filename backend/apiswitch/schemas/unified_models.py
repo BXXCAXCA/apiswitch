@@ -9,6 +9,7 @@ class UnifiedModelCreate(BaseModel):
     enabled: bool = True
     capabilities: list[str] = Field(default_factory=list)
     routing_mode: Literal["static", "combo", "auto"] = "static"
+    combo_strategy: Literal["priority", "weighted", "round_robin", "least_used", "cost_optimized", "quota_headroom", "last_known_good"] = "priority"
     category: str | None = None
     preferred_tier: str = "balanced"
     max_request_cost: float | None = Field(default=None, gt=0)
@@ -22,6 +23,7 @@ class UnifiedModelUpdate(BaseModel):
     enabled: bool | None = None
     capabilities: list[str] | None = None
     routing_mode: Literal["static", "combo", "auto"] | None = None
+    combo_strategy: Literal["priority", "weighted", "round_robin", "least_used", "cost_optimized", "quota_headroom", "last_known_good"] | None = None
     category: str | None = None
     preferred_tier: str | None = None
     max_request_cost: float | None = Field(default=None, gt=0)

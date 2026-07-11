@@ -123,6 +123,7 @@ Foundation completed:
 - Unified-model candidates can bind to a specific Provider Connection and Provider Node.
 - Gateway execution resolves the selected account credential and node endpoint; request logs and usage history retain the connection identity.
 - Unified Models expose `static`, `combo`, and `auto` mode configuration. `auto` materializes enabled provider-model/account/node tuples into durable candidates so their health and circuit-breaker history remains auditable.
+- Combo dispatch supports priority, weighted rotation, round robin, least used, cost optimized, quota headroom, and last known good ordering.
 
 Planned Provider work:
 

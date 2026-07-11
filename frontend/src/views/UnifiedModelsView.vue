@@ -9,6 +9,7 @@
           <n-form-item-gi label="描述"><n-input v-model:value="modelForm.description" placeholder="适合代码任务的模型" /></n-form-item-gi>
           <n-form-item-gi label="能力"><n-select v-model:value="modelForm.capabilities" multiple :options="capabilityOptions" /></n-form-item-gi>
           <n-form-item-gi label="路由模式"><n-select v-model:value="modelForm.routing_mode" :options="routingModeOptions" /></n-form-item-gi>
+          <n-form-item-gi label="Combo 策略"><n-select v-model:value="modelForm.combo_strategy" :options="comboStrategyOptions" /></n-form-item-gi>
           <n-form-item-gi label="优选档位"><n-select v-model:value="modelForm.preferred_tier" :options="tierOptions" /></n-form-item-gi>
           <n-form-item-gi label="启用"><n-switch v-model:value="modelForm.enabled" /></n-form-item-gi>
         </n-grid>
@@ -41,6 +42,7 @@
           <n-form-item-gi label="描述"><n-input v-model:value="editModelForm.description" /></n-form-item-gi>
           <n-form-item-gi label="能力"><n-select v-model:value="editModelForm.capabilities" multiple :options="capabilityOptions" /></n-form-item-gi>
           <n-form-item-gi label="路由模式"><n-select v-model:value="editModelForm.routing_mode" :options="routingModeOptions" /></n-form-item-gi>
+          <n-form-item-gi label="Combo 策略"><n-select v-model:value="editModelForm.combo_strategy" :options="comboStrategyOptions" /></n-form-item-gi>
           <n-form-item-gi label="优选档位"><n-select v-model:value="editModelForm.preferred_tier" :options="tierOptions" /></n-form-item-gi>
           <n-form-item-gi label="启用"><n-switch v-model:value="editModelForm.enabled" /></n-form-item-gi>
         </n-grid>
@@ -104,6 +106,7 @@ const modelForm = reactive<UnifiedModelCreate>({
   enabled: true,
   capabilities: ['text'],
   routing_mode: 'static',
+  combo_strategy: 'priority',
   preferred_tier: 'balanced',
   session_affinity_enabled: true
 })
@@ -113,6 +116,7 @@ const editModelForm = reactive<UnifiedModelCreate>({
   enabled: true,
   capabilities: ['text'],
   routing_mode: 'static',
+  combo_strategy: 'priority',
   preferred_tier: 'balanced',
   session_affinity_enabled: true
 })
@@ -142,6 +146,15 @@ const routingModeOptions = [
   { label: 'Combo 策略', value: 'combo' },
   { label: 'Auto-Combo', value: 'auto' }
 ]
+const comboStrategyOptions = [
+  { label: '优先级', value: 'priority' },
+  { label: '加权轮转', value: 'weighted' },
+  { label: '轮询', value: 'round_robin' },
+  { label: '最少使用', value: 'least_used' },
+  { label: '成本最低', value: 'cost_optimized' },
+  { label: '额度优先', value: 'quota_headroom' },
+  { label: '最近成功', value: 'last_known_good' }
+]
 const tierOptions = ['balanced', 'fast', 'cheap', 'free', 'quality', 'reliable'].map((value) => ({ label: value, value }))
 const modelOptions = computed(() => models.value.map((model) => ({ label: `${model.name} (#${model.id})`, value: model.id })))
 const providerOptions = computed(() => providers.value.map((provider) => ({ label: `${provider.name} (${provider.type})`, value: provider.id })))
@@ -149,7 +162,7 @@ const columns = [
   { title: 'ID', key: 'id' },
   { title: '名称', key: 'name' },
   { title: '描述', key: 'description' },
-  { title: '路由', key: 'routing_mode', render: (row: UnifiedModel) => `${row.routing_mode} / ${row.preferred_tier}` },
+  { title: '路由', key: 'routing_mode', render: (row: UnifiedModel) => `${row.routing_mode} / ${row.combo_strategy} / ${row.preferred_tier}` },
   {
     title: '启用',
     key: 'enabled',
@@ -240,6 +253,7 @@ function openModelEdit(row: UnifiedModel) {
   editModelForm.enabled = row.enabled
   editModelForm.capabilities = [...row.capabilities]
   editModelForm.routing_mode = row.routing_mode
+  editModelForm.combo_strategy = row.combo_strategy
   editModelForm.preferred_tier = row.preferred_tier
   editModelForm.category = row.category
   editModelForm.max_request_cost = row.max_request_cost

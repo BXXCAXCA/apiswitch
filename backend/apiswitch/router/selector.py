@@ -19,6 +19,7 @@ from apiswitch.gateway.errors import NoAvailableCandidateError, UnifiedModelNotF
 from apiswitch.providers.catalog import get_provider_catalog_item
 from apiswitch.router.circuit_breaker import is_candidate_allowed
 from apiswitch.router.auto_combo import materialize_auto_candidates
+from apiswitch.router.combo_strategies import order_combo_candidates
 from apiswitch.router.scoring import CandidateScoreInput, calculate_score_details, get_tier_score_weights
 from apiswitch.services.session_affinity import get_affinity_candidate_id
 
@@ -330,7 +331,8 @@ def list_ranked_candidates(
         raise NoAvailableCandidateError(
             f"No available candidates for unified model: {unified_model_name}; " + ", ".join(details)
         )
-    return [item for _, item in sorted(scored, key=lambda pair: (pair[0], pair[1].score), reverse=True)]
+    base_order = [item for _, item in sorted(scored, key=lambda pair: (pair[0], pair[1].score), reverse=True)]
+    return order_combo_candidates(db, unified_model, base_order)
 
 
 def select_best_candidate(db: Session, unified_model_name: str) -> SelectedCandidate:

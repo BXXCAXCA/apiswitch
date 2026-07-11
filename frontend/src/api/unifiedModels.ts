@@ -19,6 +19,7 @@ export interface UnifiedModel {
   enabled: boolean
   capabilities: string[]
   routing_mode: 'static' | 'combo' | 'auto'
+  combo_strategy: 'priority' | 'weighted' | 'round_robin' | 'least_used' | 'cost_optimized' | 'quota_headroom' | 'last_known_good'
   category?: string
   preferred_tier: string
   max_request_cost?: number
@@ -33,6 +34,7 @@ export interface UnifiedModelCreate {
   enabled: boolean
   capabilities: string[]
   routing_mode: 'static' | 'combo' | 'auto'
+  combo_strategy: 'priority' | 'weighted' | 'round_robin' | 'least_used' | 'cost_optimized' | 'quota_headroom' | 'last_known_good'
   category?: string
   preferred_tier: string
   max_request_cost?: number
