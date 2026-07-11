@@ -34,6 +34,7 @@ class CompatibleProviderAdapter(ProviderAdapter):
                     json=payload,
                 )
                 response.raise_for_status()
+                self.record_response_headers(response.headers)
                 return response.json()
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"Compatible provider chat failed: {exc}") from exc
@@ -47,6 +48,7 @@ class CompatibleProviderAdapter(ProviderAdapter):
                     json=request.model_dump(exclude_none=True),
                 )
                 response.raise_for_status()
+                self.record_response_headers(response.headers)
                 return response.json()
         except Exception as exc:  # noqa: BLE001
             raise ProviderError(f"Compatible provider embeddings failed: {exc}") from exc

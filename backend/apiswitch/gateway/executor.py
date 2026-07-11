@@ -17,6 +17,7 @@ from apiswitch.services.routing_controls import estimate_token_count
 from apiswitch.services.session_affinity import record_session_affinity
 from apiswitch.services.usage_accounting import record_usage_history
 from apiswitch.services.budget_enforcement import enforce_candidate_budgets
+from apiswitch.services.quota_accounting import record_adapter_quota_snapshot
 
 
 class GatewayExecutor:
@@ -74,6 +75,7 @@ class GatewayExecutor:
                     provider = build_selected_provider_adapter(db, selected)
                     upstream_request = request.model_copy(update={"model": selected.upstream_model})
                     response = await provider.chat(upstream_request)
+                    record_adapter_quota_snapshot(db, provider=provider, provider_connection_id=selected.provider_connection_id)
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
@@ -233,6 +235,7 @@ class GatewayExecutor:
                     provider = build_selected_provider_adapter(db, selected)
                     upstream_request = request.model_copy(update={"model": selected.upstream_model})
                     response = await provider.messages(upstream_request)
+                    record_adapter_quota_snapshot(db, provider=provider, provider_connection_id=selected.provider_connection_id)
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
                     record_candidate_success(db, selected.candidate_id, attempt_latency_ms)

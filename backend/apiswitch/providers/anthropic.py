@@ -53,6 +53,7 @@ class AnthropicProviderAdapter(ProviderAdapter):
                 f"Anthropic messages request failed with status {response.status_code}: {response.text}",
                 "upstream_http_error",
             )
+        self.record_response_headers(response.headers)
         return response.json()
 
     async def list_models(self) -> list[dict[str, Any]]:

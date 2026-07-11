@@ -15,6 +15,10 @@ class ProviderAdapter(ABC):
     name: str
     provider_type: str
 
+    def record_response_headers(self, headers: Any) -> None:
+        """Expose normalized upstream rate-limit metadata to the gateway."""
+        self.last_response_headers = {str(key).lower(): str(value) for key, value in headers.items()}
+
     @abstractmethod
     async def chat(self, request: ChatCompletionRequest) -> dict[str, Any]:
         raise NotImplementedError

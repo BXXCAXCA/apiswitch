@@ -125,6 +125,7 @@ Foundation completed:
 - Unified Models expose `static`, `combo`, and `auto` mode configuration. `auto` materializes enabled provider-model/account/node tuples into durable candidates so their health and circuit-breaker history remains auditable.
 - Combo dispatch supports priority, weighted rotation, round robin, least used, cost optimized, quota headroom, and last known good ordering.
 - Budget scopes now accumulate actual estimated request costs and enforce `warn_only`, `reject`, `fallback_to_free`, or `fallback_to_cheapest` behavior before gateway execution.
+- OpenAI-style, compatible, Gemini, and Anthropic adapters normalize common rate-limit headers into Connection-level Quota Snapshots after successful calls.
 
 Planned Provider work:
 

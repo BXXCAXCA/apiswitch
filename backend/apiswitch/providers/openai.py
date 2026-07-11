@@ -40,6 +40,7 @@ class OpenAIProviderAdapter(ProviderAdapter):
                 f"OpenAI chat request failed with status {response.status_code}: {response.text}",
                 "upstream_http_error",
             )
+        self.record_response_headers(response.headers)
         return response.json()
 
     async def embeddings(self, request: EmbeddingsRequest) -> dict[str, Any]:
@@ -57,6 +58,7 @@ class OpenAIProviderAdapter(ProviderAdapter):
                 f"OpenAI embeddings request failed with status {response.status_code}: {response.text}",
                 "upstream_http_error",
             )
+        self.record_response_headers(response.headers)
         return response.json()
 
     async def stream_chat(self, request: ChatCompletionRequest) -> AsyncIterator[bytes]:
