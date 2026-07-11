@@ -8,6 +8,8 @@
           <n-form-item-gi label="名称"><n-input v-model:value="modelForm.name" placeholder="code-best" /></n-form-item-gi>
           <n-form-item-gi label="描述"><n-input v-model:value="modelForm.description" placeholder="适合代码任务的模型" /></n-form-item-gi>
           <n-form-item-gi label="能力"><n-select v-model:value="modelForm.capabilities" multiple :options="capabilityOptions" /></n-form-item-gi>
+          <n-form-item-gi label="路由模式"><n-select v-model:value="modelForm.routing_mode" :options="routingModeOptions" /></n-form-item-gi>
+          <n-form-item-gi label="优选档位"><n-select v-model:value="modelForm.preferred_tier" :options="tierOptions" /></n-form-item-gi>
           <n-form-item-gi label="启用"><n-switch v-model:value="modelForm.enabled" /></n-form-item-gi>
         </n-grid>
         <n-button type="primary" :loading="savingModel" @click="handleCreateModel">创建统一模型</n-button>
@@ -38,6 +40,8 @@
           <n-form-item-gi label="名称"><n-input v-model:value="editModelForm.name" /></n-form-item-gi>
           <n-form-item-gi label="描述"><n-input v-model:value="editModelForm.description" /></n-form-item-gi>
           <n-form-item-gi label="能力"><n-select v-model:value="editModelForm.capabilities" multiple :options="capabilityOptions" /></n-form-item-gi>
+          <n-form-item-gi label="路由模式"><n-select v-model:value="editModelForm.routing_mode" :options="routingModeOptions" /></n-form-item-gi>
+          <n-form-item-gi label="优选档位"><n-select v-model:value="editModelForm.preferred_tier" :options="tierOptions" /></n-form-item-gi>
           <n-form-item-gi label="启用"><n-switch v-model:value="editModelForm.enabled" /></n-form-item-gi>
         </n-grid>
         <n-space>
@@ -98,13 +102,19 @@ const modelForm = reactive<UnifiedModelCreate>({
   name: '',
   description: '',
   enabled: true,
-  capabilities: ['text']
+  capabilities: ['text'],
+  routing_mode: 'static',
+  preferred_tier: 'balanced',
+  session_affinity_enabled: true
 })
 const editModelForm = reactive<UnifiedModelCreate>({
   name: '',
   description: '',
   enabled: true,
-  capabilities: ['text']
+  capabilities: ['text'],
+  routing_mode: 'static',
+  preferred_tier: 'balanced',
+  session_affinity_enabled: true
 })
 const candidateForm = reactive<UnifiedModelCandidateCreate>({
   provider_id: 0,
@@ -127,12 +137,19 @@ const capabilityOptions = [
   { label: 'vision', value: 'vision' },
   { label: 'embeddings', value: 'embeddings' }
 ]
+const routingModeOptions = [
+  { label: '静态候选', value: 'static' },
+  { label: 'Combo 策略', value: 'combo' },
+  { label: 'Auto-Combo', value: 'auto' }
+]
+const tierOptions = ['balanced', 'fast', 'cheap', 'free', 'quality', 'reliable'].map((value) => ({ label: value, value }))
 const modelOptions = computed(() => models.value.map((model) => ({ label: `${model.name} (#${model.id})`, value: model.id })))
 const providerOptions = computed(() => providers.value.map((provider) => ({ label: `${provider.name} (${provider.type})`, value: provider.id })))
 const columns = [
   { title: 'ID', key: 'id' },
   { title: '名称', key: 'name' },
   { title: '描述', key: 'description' },
+  { title: '路由', key: 'routing_mode', render: (row: UnifiedModel) => `${row.routing_mode} / ${row.preferred_tier}` },
   {
     title: '启用',
     key: 'enabled',
@@ -222,6 +239,12 @@ function openModelEdit(row: UnifiedModel) {
   editModelForm.description = row.description ?? ''
   editModelForm.enabled = row.enabled
   editModelForm.capabilities = [...row.capabilities]
+  editModelForm.routing_mode = row.routing_mode
+  editModelForm.preferred_tier = row.preferred_tier
+  editModelForm.category = row.category
+  editModelForm.max_request_cost = row.max_request_cost
+  editModelForm.min_context_window = row.min_context_window
+  editModelForm.session_affinity_enabled = row.session_affinity_enabled
   editingModel.value = true
 }
 

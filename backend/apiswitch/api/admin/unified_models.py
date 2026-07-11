@@ -23,6 +23,32 @@ def _capabilities(value: dict | None) -> list[str]:
     return capabilities if isinstance(capabilities, list) else []
 
 
+def _routing(value: dict | None) -> dict:
+    config = (value or {}).get("routing", {})
+    return config if isinstance(config, dict) else {}
+
+
+def _model_config(payload: UnifiedModelCreate | UnifiedModelUpdate, existing: dict | None = None) -> dict:
+    """Keep capabilities and routing configuration together in the stable JSON column."""
+    result = dict(existing or {})
+    data = payload.model_dump(exclude_unset=True)
+    if "capabilities" in data:
+        result["capabilities"] = data["capabilities"]
+    routing = dict(_routing(result))
+    for key in ("routing_mode", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"):
+        if key in data:
+            routing[key] = data[key]
+    if isinstance(payload, UnifiedModelCreate):
+        routing.setdefault("routing_mode", payload.routing_mode)
+        routing.setdefault("category", payload.category)
+        routing.setdefault("preferred_tier", payload.preferred_tier)
+        routing.setdefault("max_request_cost", payload.max_request_cost)
+        routing.setdefault("min_context_window", payload.min_context_window)
+        routing.setdefault("session_affinity_enabled", payload.session_affinity_enabled)
+    result["routing"] = routing
+    return result
+
+
 def _get_unified_model(db: Session, model_id: int) -> UnifiedModel:
     model = db.get(UnifiedModel, model_id)
     if model is None:
@@ -131,12 +157,19 @@ def _to_read(db: Session, model: UnifiedModel) -> UnifiedModelRead:
         .where(UnifiedModelCandidate.unified_model_id == model.id)
         .order_by(UnifiedModelCandidate.manual_priority.desc())
     ).all()
+    routing = _routing(model.capabilities_json)
     return UnifiedModelRead(
         id=model.id,
         name=model.name,
         description=model.description,
         enabled=model.enabled,
         capabilities=_capabilities(model.capabilities_json),
+        routing_mode=routing.get("routing_mode", "static"),
+        category=routing.get("category"),
+        preferred_tier=routing.get("preferred_tier", "balanced"),
+        max_request_cost=routing.get("max_request_cost"),
+        min_context_window=routing.get("min_context_window"),
+        session_affinity_enabled=routing.get("session_affinity_enabled", True),
         candidates=[
             _candidate_to_read(candidate, provider).model_dump()
             for candidate, provider in rows
@@ -159,7 +192,7 @@ async def create_unified_model(
         name=payload.name,
         description=payload.description,
         enabled=payload.enabled,
-        capabilities_json={"capabilities": payload.capabilities},
+        capabilities_json=_model_config(payload),
     )
     db.add(model)
     db.commit()
@@ -180,8 +213,12 @@ async def update_unified_model(
 ) -> UnifiedModelRead:
     model = _get_unified_model(db, model_id)
     data = payload.model_dump(exclude_unset=True)
-    if "capabilities" in data:
-        model.capabilities_json = {"capabilities": data.pop("capabilities")}
+    routing_keys = {"routing_mode", "category", "preferred_tier", "max_request_cost", "min_context_window", "session_affinity_enabled"}
+    if "capabilities" in data or routing_keys & data.keys():
+        model.capabilities_json = _model_config(payload, model.capabilities_json)
+        data.pop("capabilities", None)
+        for key in routing_keys:
+            data.pop(key, None)
     for key, value in data.items():
         setattr(model, key, value)
     db.commit()

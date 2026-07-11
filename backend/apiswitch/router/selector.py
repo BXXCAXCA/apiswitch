@@ -18,6 +18,7 @@ from apiswitch.db.models import (
 from apiswitch.gateway.errors import NoAvailableCandidateError, UnifiedModelNotFoundError
 from apiswitch.providers.catalog import get_provider_catalog_item
 from apiswitch.router.circuit_breaker import is_candidate_allowed
+from apiswitch.router.auto_combo import materialize_auto_candidates
 from apiswitch.router.scoring import CandidateScoreInput, calculate_score_details, get_tier_score_weights
 from apiswitch.services.session_affinity import get_affinity_candidate_id
 
@@ -190,6 +191,8 @@ def list_ranked_candidates(
     )
     if unified_model is None:
         raise UnifiedModelNotFoundError(f"Unified model not found: {unified_model_name}")
+
+    materialize_auto_candidates(db, unified_model)
 
     normalized_tier, score_weights = get_tier_score_weights(tier)
     affinity_candidate_id = get_affinity_candidate_id(db, unified_model, session_key)

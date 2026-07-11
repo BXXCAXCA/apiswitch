@@ -29,13 +29,14 @@ def _create_connection_and_node(client, provider_id: int) -> tuple[dict, dict]:
 def test_candidate_can_route_through_specific_connection_and_node(client, gateway_headers):
     provider = client.get("/api/admin/providers").json()[0]
     unified_model = next(item for item in client.get("/api/admin/unified-models").json() if item["name"] == "code-best")
+    client.patch(f"/api/admin/unified-models/{unified_model['id']}", json={"routing_mode": "static"})
     connection, node = _create_connection_and_node(client, provider["id"])
-    legacy_candidate = unified_model["candidates"][0]
-    disabled = client.patch(
-        f"/api/admin/unified-models/{unified_model['id']}/candidates/{legacy_candidate['id']}",
-        json={"enabled": False},
-    )
-    assert disabled.status_code == 200
+    for existing_candidate in unified_model["candidates"]:
+        disabled = client.patch(
+            f"/api/admin/unified-models/{unified_model['id']}/candidates/{existing_candidate['id']}",
+            json={"enabled": False},
+        )
+        assert disabled.status_code == 200
 
     candidate_response = client.post(
         f"/api/admin/unified-models/{unified_model['id']}/candidates",

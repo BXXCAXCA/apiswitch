@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +8,12 @@ class UnifiedModelCreate(BaseModel):
     description: str | None = None
     enabled: bool = True
     capabilities: list[str] = Field(default_factory=list)
+    routing_mode: Literal["static", "combo", "auto"] = "static"
+    category: str | None = None
+    preferred_tier: str = "balanced"
+    max_request_cost: float | None = Field(default=None, gt=0)
+    min_context_window: int | None = Field(default=None, ge=1)
+    session_affinity_enabled: bool = True
 
 
 class UnifiedModelUpdate(BaseModel):
@@ -15,6 +21,12 @@ class UnifiedModelUpdate(BaseModel):
     description: str | None = None
     enabled: bool | None = None
     capabilities: list[str] | None = None
+    routing_mode: Literal["static", "combo", "auto"] | None = None
+    category: str | None = None
+    preferred_tier: str | None = None
+    max_request_cost: float | None = Field(default=None, gt=0)
+    min_context_window: int | None = Field(default=None, ge=1)
+    session_affinity_enabled: bool | None = None
 
 
 class UnifiedModelRead(UnifiedModelCreate):

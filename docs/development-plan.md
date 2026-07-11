@@ -122,6 +122,7 @@ Foundation completed:
 - OmniRoute-inspired architecture roadmap documented in `docs/omniroute-inspired-roadmap.md`
 - Unified-model candidates can bind to a specific Provider Connection and Provider Node.
 - Gateway execution resolves the selected account credential and node endpoint; request logs and usage history retain the connection identity.
+- Unified Models expose `static`, `combo`, and `auto` mode configuration. `auto` materializes enabled provider-model/account/node tuples into durable candidates so their health and circuit-breaker history remains auditable.
 
 Planned Provider work:
 

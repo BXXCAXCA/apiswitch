@@ -18,6 +18,12 @@ export interface UnifiedModel {
   description?: string
   enabled: boolean
   capabilities: string[]
+  routing_mode: 'static' | 'combo' | 'auto'
+  category?: string
+  preferred_tier: string
+  max_request_cost?: number
+  min_context_window?: number
+  session_affinity_enabled: boolean
   candidates: UnifiedModelCandidate[]
 }
 
@@ -26,6 +32,12 @@ export interface UnifiedModelCreate {
   description?: string
   enabled: boolean
   capabilities: string[]
+  routing_mode: 'static' | 'combo' | 'auto'
+  category?: string
+  preferred_tier: string
+  max_request_cost?: number
+  min_context_window?: number
+  session_affinity_enabled: boolean
 }
 
 export type UnifiedModelUpdate = Partial<UnifiedModelCreate>

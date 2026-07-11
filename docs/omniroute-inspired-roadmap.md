@@ -194,6 +194,8 @@ Unified Model 增加三种内部路由模式：
 
 根据统一模型约束动态扫描所有可用 Provider Connection 和 Node，生成临时候选池。
 
+当前实现会将动态发现的组合持久化为带 `auto_managed` 标记的候选，以便保留健康度和熔断历史；后续将增加候选过期清理和更完整的 Combo 策略调度。
+
 统一模型可以定义：
 
 - 类别：`chat` / `coding` / `reasoning` / `vision` / `multimodal` / `embedding`
