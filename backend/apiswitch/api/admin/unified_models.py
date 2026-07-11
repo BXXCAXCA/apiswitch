@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db
-from apiswitch.db.models import Provider, UnifiedModel, UnifiedModelCandidate
+from apiswitch.db.models import Provider, ProviderConnection, ProviderNode, UnifiedModel, UnifiedModelCandidate
 from apiswitch.schemas.unified_models import (
     UnifiedModelCandidateCreate,
     UnifiedModelCandidateRead,
@@ -44,17 +44,47 @@ def _get_candidate(db: Session, candidate_id: int) -> UnifiedModelCandidate:
     return candidate
 
 
+def _validate_route_target(
+    db: Session,
+    provider_id: int,
+    connection_id: int | None,
+    node_id: int | None,
+) -> None:
+    connection = db.get(ProviderConnection, connection_id) if connection_id is not None else None
+    node = db.get(ProviderNode, node_id) if node_id is not None else None
+    if connection_id is not None and connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider connection not found")
+    if node_id is not None and node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Provider node not found")
+    if connection is not None and connection.provider_id != provider_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Connection belongs to another provider")
+    if node is not None:
+        if node.provider_id != provider_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Node belongs to another provider")
+        if node.connection_id is not None and connection_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="A node-bound candidate must select the node's connection",
+            )
+        if connection_id is not None and node.connection_id != connection_id:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Node is not attached to the selected connection")
+
+
 def _find_duplicate_candidate(
     db: Session,
     model_id: int,
     provider_id: int,
     upstream_model: str,
+    connection_id: int | None,
+    node_id: int | None,
     exclude_candidate_id: int | None = None,
 ) -> UnifiedModelCandidate | None:
     statement = select(UnifiedModelCandidate).where(
         UnifiedModelCandidate.unified_model_id == model_id,
         UnifiedModelCandidate.provider_id == provider_id,
         UnifiedModelCandidate.upstream_model == upstream_model,
+        UnifiedModelCandidate.provider_connection_id == connection_id,
+        UnifiedModelCandidate.provider_node_id == node_id,
     )
     if exclude_candidate_id is not None:
         statement = statement.where(UnifiedModelCandidate.id != exclude_candidate_id)
@@ -66,9 +96,11 @@ def _reject_duplicate_candidate(
     model_id: int,
     provider_id: int,
     upstream_model: str,
+    connection_id: int | None,
+    node_id: int | None,
     exclude_candidate_id: int | None = None,
 ) -> None:
-    duplicate = _find_duplicate_candidate(db, model_id, provider_id, upstream_model, exclude_candidate_id)
+    duplicate = _find_duplicate_candidate(db, model_id, provider_id, upstream_model, connection_id, node_id, exclude_candidate_id)
     if duplicate is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -83,6 +115,8 @@ def _candidate_to_read(candidate: UnifiedModelCandidate, provider: Provider) -> 
         provider_id=provider.id,
         provider_name=provider.name,
         provider_type=provider.type,
+        provider_connection_id=candidate.provider_connection_id,
+        provider_node_id=candidate.provider_node_id,
         upstream_model=candidate.upstream_model,
         manual_priority=candidate.manual_priority,
         enabled=candidate.enabled,
@@ -191,10 +225,13 @@ async def create_candidate(
 ) -> UnifiedModelCandidateRead:
     _get_unified_model(db, model_id)
     provider = _get_provider(db, payload.provider_id)
-    _reject_duplicate_candidate(db, model_id, payload.provider_id, payload.upstream_model)
+    _validate_route_target(db, payload.provider_id, payload.provider_connection_id, payload.provider_node_id)
+    _reject_duplicate_candidate(db, model_id, payload.provider_id, payload.upstream_model, payload.provider_connection_id, payload.provider_node_id)
     candidate = UnifiedModelCandidate(
         unified_model_id=model_id,
         provider_id=payload.provider_id,
+        provider_connection_id=payload.provider_connection_id,
+        provider_node_id=payload.provider_node_id,
         upstream_model=payload.upstream_model,
         manual_priority=payload.manual_priority,
         enabled=payload.enabled,
@@ -220,9 +257,12 @@ async def update_candidate(
     data = payload.model_dump(exclude_unset=True)
     next_provider_id = data.get("provider_id", candidate.provider_id)
     next_upstream_model = data.get("upstream_model", candidate.upstream_model)
+    next_connection_id = data.get("provider_connection_id", candidate.provider_connection_id)
+    next_node_id = data.get("provider_node_id", candidate.provider_node_id)
     if "provider_id" in data:
         _get_provider(db, data["provider_id"])
-    _reject_duplicate_candidate(db, model_id, next_provider_id, next_upstream_model, exclude_candidate_id=candidate_id)
+    _validate_route_target(db, next_provider_id, next_connection_id, next_node_id)
+    _reject_duplicate_candidate(db, model_id, next_provider_id, next_upstream_model, next_connection_id, next_node_id, exclude_candidate_id=candidate_id)
     if "capabilities" in data:
         candidate.capabilities_json = {"capabilities": data.pop("capabilities")}
     for key, value in data.items():

@@ -24,6 +24,8 @@ class UnifiedModelRead(UnifiedModelCreate):
 
 class UnifiedModelCandidateCreate(BaseModel):
     provider_id: int
+    provider_connection_id: int | None = None
+    provider_node_id: int | None = None
     upstream_model: str
     manual_priority: int = 100
     enabled: bool = True
@@ -32,6 +34,8 @@ class UnifiedModelCandidateCreate(BaseModel):
 
 class UnifiedModelCandidateUpdate(BaseModel):
     provider_id: int | None = None
+    provider_connection_id: int | None = None
+    provider_node_id: int | None = None
     upstream_model: str | None = None
     manual_priority: int | None = None
     enabled: bool | None = None
@@ -44,6 +48,8 @@ class UnifiedModelCandidateRead(BaseModel):
     provider_id: int
     provider_name: str
     provider_type: str
+    provider_connection_id: int | None = None
+    provider_node_id: int | None = None
     upstream_model: str
     manual_priority: int
     enabled: bool

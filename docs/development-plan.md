@@ -120,6 +120,8 @@ Foundation completed:
 - `usage_history` database model and migration
 - `session_affinity` database model and migration
 - OmniRoute-inspired architecture roadmap documented in `docs/omniroute-inspired-roadmap.md`
+- Unified-model candidates can bind to a specific Provider Connection and Provider Node.
+- Gateway execution resolves the selected account credential and node endpoint; request logs and usage history retain the connection identity.
 
 Planned Provider work:
 

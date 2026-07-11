@@ -22,6 +22,8 @@ async def list_logs(db: Session = Depends(get_db), limit: int = 50) -> dict:
                 "inbound_protocol": log.inbound_protocol,
                 "unified_model": log.unified_model,
                 "final_provider": log.final_provider,
+                "provider_connection_id": log.provider_connection_id,
+                "provider_node_id": log.provider_node_id,
                 "final_upstream_model": log.final_upstream_model,
                 "success": log.success,
                 "error_type": log.error_type,

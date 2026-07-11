@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from apiswitch.db.models import (
     Provider,
     ProviderConnection,
     ProviderHealth,
+    ProviderNode,
     QuotaSnapshot,
     UnifiedModel,
     UnifiedModelCandidate,
@@ -26,6 +28,8 @@ class SelectedCandidate:
     provider_id: int
     provider_name: str
     provider_type: str
+    provider_connection_id: int | None
+    provider_node_id: int | None
     upstream_model: str
     score: float
     score_breakdown: dict[str, object]
@@ -36,6 +40,8 @@ class SelectedCandidate:
 class _CandidateMetrics:
     candidate: UnifiedModelCandidate
     provider: Provider
+    connection: ProviderConnection | None
+    node: ProviderNode | None
     health: ProviderHealth | None
     stability: float
     speed: float
@@ -97,17 +103,21 @@ def _estimate_cost(
     return round((input_cost or 0.0) + (output_cost or 0.0), 10)
 
 
-def _latest_quota_score(db: Session, provider_id: int) -> float:
+def _latest_quota_score(db: Session, provider_id: int, connection_id: int | None = None) -> float:
     snapshot = db.scalar(
         select(QuotaSnapshot)
         .join(ProviderConnection, ProviderConnection.id == QuotaSnapshot.provider_connection_id)
-        .where(
-            ProviderConnection.provider_id == provider_id,
-            ProviderConnection.enabled.is_(True),
-        )
+        .where(ProviderConnection.provider_id == provider_id, ProviderConnection.enabled.is_(True))
         .order_by(QuotaSnapshot.captured_at.desc(), QuotaSnapshot.id.desc())
         .limit(1)
     )
+    if connection_id is not None:
+        snapshot = db.scalar(
+            select(QuotaSnapshot)
+            .where(QuotaSnapshot.provider_connection_id == connection_id)
+            .order_by(QuotaSnapshot.captured_at.desc(), QuotaSnapshot.id.desc())
+            .limit(1)
+        )
     if snapshot is None:
         return 50.0
 
@@ -207,6 +217,23 @@ def list_ranked_candidates(
             blocked_count += 1
             continue
 
+        connection = (
+            db.get(ProviderConnection, candidate.provider_connection_id)
+            if candidate.provider_connection_id is not None
+            else None
+        )
+        node = db.get(ProviderNode, candidate.provider_node_id) if candidate.provider_node_id is not None else None
+        if connection is not None:
+            if connection.provider_id != provider.id or not connection.enabled:
+                continue
+            if connection.expires_at is not None and connection.expires_at <= datetime.utcnow():
+                continue
+        if node is not None:
+            if node.provider_id != provider.id or not node.enabled:
+                continue
+            if node.connection_id is not None and (connection is None or node.connection_id != connection.id):
+                continue
+
         pricing = _latest_pricing(db, provider.id, candidate.upstream_model)
         blended_price = _blended_price(pricing)
         estimated_cost = _estimate_cost(pricing, estimated_input_tokens, estimated_output_tokens)
@@ -232,11 +259,13 @@ def list_ranked_candidates(
             _CandidateMetrics(
                 candidate=candidate,
                 provider=provider,
+                connection=connection,
+                node=node,
                 health=health,
                 stability=stability,
                 speed=speed,
                 health_score=max(0.0, stability - consecutive_failures * 10.0),
-                quota_score=_latest_quota_score(db, provider.id),
+                quota_score=_latest_quota_score(db, provider.id, connection.id if connection else None),
                 blended_price=blended_price,
                 estimated_request_cost=estimated_cost,
                 task_fit_score=_task_fit(unified_model, candidate),
@@ -270,6 +299,8 @@ def list_ranked_candidates(
             provider_id=item.provider.id,
             provider_name=item.provider.name,
             provider_type=item.provider.type,
+            provider_connection_id=item.connection.id if item.connection else None,
+            provider_node_id=item.node.id if item.node else None,
             upstream_model=item.candidate.upstream_model,
             score=result.score,
             estimated_request_cost=item.estimated_request_cost,
@@ -277,6 +308,8 @@ def list_ranked_candidates(
                 "mode": result.mode,
                 "tier": normalized_tier,
                 "session_affinity": affinity_match,
+                "provider_connection_id": item.connection.id if item.connection else None,
+                "provider_node_id": item.node.id if item.node else None,
                 "estimated_request_cost": item.estimated_request_cost,
                 "factors": result.factors,
                 "weighted_factors": result.weighted_factors,

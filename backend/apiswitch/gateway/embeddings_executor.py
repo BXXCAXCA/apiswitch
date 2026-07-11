@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from apiswitch.db.models import Provider, RequestLog
 from apiswitch.gateway.errors import GatewayError, NoAvailableCandidateError
 from apiswitch.providers.base import ProviderError
-from apiswitch.providers.factory import build_provider_adapter
+from apiswitch.providers.factory import build_selected_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import EmbeddingsRequest
@@ -64,7 +64,7 @@ async def execute_embeddings(
                         f"Provider config not found: {selected.provider_id}",
                         "provider_not_found",
                     )
-                provider = build_provider_adapter(provider_config)
+                provider = build_selected_provider_adapter(db, selected)
                 upstream_request = request.model_copy(update={"model": selected.upstream_model})
                 response = await provider.embeddings(upstream_request)
                 attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
@@ -75,6 +75,7 @@ async def execute_embeddings(
                     unified_model_name=request.model,
                     session_key=session_key,
                     candidate_id=selected.candidate_id,
+                    provider_connection_id=selected.provider_connection_id,
                 )
                 attempts.append(
                     {
@@ -91,6 +92,8 @@ async def execute_embeddings(
                 input_tokens = usage.get("prompt_tokens", usage.get("input_tokens", estimated_input_tokens))
                 log.finished_at = datetime.utcnow()
                 log.final_provider = selected.provider_name
+                log.provider_connection_id = selected.provider_connection_id
+                log.provider_node_id = selected.provider_node_id
                 log.final_upstream_model = selected.upstream_model
                 log.success = True
                 log.latency_ms = total_latency_ms
@@ -101,7 +104,7 @@ async def execute_embeddings(
                     db,
                     request_id=request_id,
                     api_token_id=api_token_id,
-                    provider_connection_id=None,
+                    provider_connection_id=selected.provider_connection_id,
                     provider_id=selected.provider_id,
                     unified_model=request.model,
                     upstream_model=selected.upstream_model,

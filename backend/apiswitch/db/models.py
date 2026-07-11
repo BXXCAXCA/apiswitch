@@ -102,6 +102,14 @@ class UnifiedModelCandidate(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     unified_model_id: Mapped[int] = mapped_column(ForeignKey("unified_models.id"), index=True)
     provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), index=True)
+    # A candidate can target a specific account and endpoint.  Keeping these
+    # nullable preserves all legacy provider-only routes.
+    provider_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_connections.id"), nullable=True, index=True
+    )
+    provider_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_nodes.id"), nullable=True, index=True
+    )
     upstream_model: Mapped[str] = mapped_column(String(256))
     manual_priority: Mapped[int] = mapped_column(Integer, default=100)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -151,6 +159,12 @@ class RequestLog(Base):
     inbound_protocol: Mapped[str] = mapped_column(String(64))
     unified_model: Mapped[str] = mapped_column(String(128))
     final_provider: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    provider_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_connections.id"), nullable=True, index=True
+    )
+    provider_node_id: Mapped[int | None] = mapped_column(
+        ForeignKey("provider_nodes.id"), nullable=True, index=True
+    )
     final_upstream_model: Mapped[str | None] = mapped_column(String(256), nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)

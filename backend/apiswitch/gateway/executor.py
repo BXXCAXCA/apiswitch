@@ -9,7 +9,7 @@ from apiswitch.db.models import Provider, RequestLog
 from apiswitch.gateway.errors import GatewayError, NoAvailableCandidateError
 from apiswitch.gateway.streaming import rewrite_openai_sse_model
 from apiswitch.providers.base import ProviderError
-from apiswitch.providers.factory import build_provider_adapter
+from apiswitch.providers.factory import build_selected_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
 from apiswitch.router.selector import SelectedCandidate, list_ranked_candidates
 from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRequest
@@ -69,7 +69,7 @@ class GatewayExecutor:
                             f"Provider config not found: {selected.provider_id}",
                             "provider_not_found",
                         )
-                    provider = build_provider_adapter(provider_config)
+                    provider = build_selected_provider_adapter(db, selected)
                     upstream_request = request.model_copy(update={"model": selected.upstream_model})
                     response = await provider.chat(upstream_request)
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
@@ -80,6 +80,7 @@ class GatewayExecutor:
                         unified_model_name=request.model,
                         session_key=session_key,
                         candidate_id=selected.candidate_id,
+                        provider_connection_id=selected.provider_connection_id,
                     )
 
                     attempts.append(
@@ -94,6 +95,8 @@ class GatewayExecutor:
                     )
                     log.finished_at = datetime.utcnow()
                     log.final_provider = selected.provider_name
+                    log.provider_connection_id = selected.provider_connection_id
+                    log.provider_node_id = selected.provider_node_id
                     log.final_upstream_model = selected.upstream_model
                     log.success = True
                     log.latency_ms = total_latency_ms
@@ -107,7 +110,7 @@ class GatewayExecutor:
                         db,
                         request_id=request_id,
                         api_token_id=api_token_id,
-                        provider_connection_id=None,
+                        provider_connection_id=selected.provider_connection_id,
                         provider_id=selected.provider_id,
                         unified_model=request.model,
                         upstream_model=selected.upstream_model,
@@ -224,7 +227,7 @@ class GatewayExecutor:
                             f"Provider config not found: {selected.provider_id}",
                             "provider_not_found",
                         )
-                    provider = build_provider_adapter(provider_config)
+                    provider = build_selected_provider_adapter(db, selected)
                     upstream_request = request.model_copy(update={"model": selected.upstream_model})
                     response = await provider.messages(upstream_request)
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
@@ -235,6 +238,7 @@ class GatewayExecutor:
                         unified_model_name=request.model,
                         session_key=session_key,
                         candidate_id=selected.candidate_id,
+                        provider_connection_id=selected.provider_connection_id,
                     )
                     attempts.append(
                         {
@@ -248,6 +252,8 @@ class GatewayExecutor:
                     )
                     log.finished_at = datetime.utcnow()
                     log.final_provider = selected.provider_name
+                    log.provider_connection_id = selected.provider_connection_id
+                    log.provider_node_id = selected.provider_node_id
                     log.final_upstream_model = selected.upstream_model
                     log.success = True
                     log.latency_ms = total_latency_ms
@@ -261,7 +267,7 @@ class GatewayExecutor:
                         db,
                         request_id=request_id,
                         api_token_id=api_token_id,
-                        provider_connection_id=None,
+                        provider_connection_id=selected.provider_connection_id,
                         provider_id=selected.provider_id,
                         unified_model=request.model,
                         upstream_model=selected.upstream_model,
@@ -372,7 +378,7 @@ class GatewayExecutor:
                             f"Provider config not found: {selected.provider_id}",
                             "provider_not_found",
                         )
-                    provider = build_provider_adapter(provider_config)
+                    provider = build_selected_provider_adapter(db, selected)
                     upstream_request = request.model_copy(update={"model": selected.upstream_model, "stream": True})
                     metadata = {
                         "request_id": request_id,
@@ -404,6 +410,7 @@ class GatewayExecutor:
                         unified_model_name=request.model,
                         session_key=session_key,
                         candidate_id=selected.candidate_id,
+                        provider_connection_id=selected.provider_connection_id,
                     )
                     attempts.append(
                         {
@@ -417,6 +424,8 @@ class GatewayExecutor:
                     )
                     log.finished_at = datetime.utcnow()
                     log.final_provider = selected.provider_name
+                    log.provider_connection_id = selected.provider_connection_id
+                    log.provider_node_id = selected.provider_node_id
                     log.final_upstream_model = selected.upstream_model
                     log.success = True
                     log.latency_ms = total_latency_ms
