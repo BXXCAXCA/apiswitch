@@ -12,6 +12,7 @@ export interface Budget {
   alert_threshold_percent: number
   usage_percent: number | null
   alert_triggered: boolean
+  enforcement_action: 'warn_only' | 'reject' | 'fallback_to_free' | 'fallback_to_cheapest'
   created_at: string
   updated_at: string
 }
@@ -25,6 +26,7 @@ export interface BudgetCreate {
   enabled: boolean
   spent_amount?: number
   alert_threshold_percent: number
+  enforcement_action: 'warn_only' | 'reject' | 'fallback_to_free' | 'fallback_to_cheapest'
 }
 
 export interface BudgetUpdate {
@@ -36,6 +38,7 @@ export interface BudgetUpdate {
   enabled?: boolean
   spent_amount?: number
   alert_threshold_percent?: number
+  enforcement_action?: 'warn_only' | 'reject' | 'fallback_to_free' | 'fallback_to_cheapest'
 }
 
 export function fetchBudgets() {

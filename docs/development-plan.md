@@ -124,6 +124,7 @@ Foundation completed:
 - Gateway execution resolves the selected account credential and node endpoint; request logs and usage history retain the connection identity.
 - Unified Models expose `static`, `combo`, and `auto` mode configuration. `auto` materializes enabled provider-model/account/node tuples into durable candidates so their health and circuit-breaker history remains auditable.
 - Combo dispatch supports priority, weighted rotation, round robin, least used, cost optimized, quota headroom, and last known good ordering.
+- Budget scopes now accumulate actual estimated request costs and enforce `warn_only`, `reject`, `fallback_to_free`, or `fallback_to_cheapest` behavior before gateway execution.
 
 Planned Provider work:
 

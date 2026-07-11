@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -12,6 +14,7 @@ class BudgetCreate(BaseModel):
     enabled: bool = True
     spent_amount: float = Field(default=0, ge=0)
     alert_threshold_percent: int = Field(default=80, ge=1, le=100)
+    enforcement_action: Literal["warn_only", "reject", "fallback_to_free", "fallback_to_cheapest"] = "warn_only"
 
 
 class BudgetUpdate(BaseModel):
@@ -23,6 +26,7 @@ class BudgetUpdate(BaseModel):
     enabled: bool | None = None
     spent_amount: float | None = Field(default=None, ge=0)
     alert_threshold_percent: int | None = Field(default=None, ge=1, le=100)
+    enforcement_action: Literal["warn_only", "reject", "fallback_to_free", "fallback_to_cheapest"] | None = None
 
 
 class BudgetRead(BaseModel):
@@ -37,5 +41,6 @@ class BudgetRead(BaseModel):
     alert_threshold_percent: int
     usage_percent: float | None
     alert_triggered: bool
+    enforcement_action: str
     created_at: datetime
     updated_at: datetime

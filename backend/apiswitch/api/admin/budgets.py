@@ -36,6 +36,7 @@ def _to_read(budget: Budget) -> BudgetRead:
         alert_threshold_percent=budget.alert_threshold_percent,
         usage_percent=usage_percent,
         alert_triggered=usage_percent is not None and usage_percent >= budget.alert_threshold_percent,
+        enforcement_action=budget.enforcement_action,
         created_at=budget.created_at,
         updated_at=budget.updated_at,
     )
@@ -58,6 +59,7 @@ async def create_budget(payload: BudgetCreate, db: Session = Depends(get_db)) ->
         enabled=payload.enabled,
         spent_amount=payload.spent_amount,
         alert_threshold_percent=payload.alert_threshold_percent,
+        enforcement_action=payload.enforcement_action,
     )
     db.add(budget)
     db.commit()

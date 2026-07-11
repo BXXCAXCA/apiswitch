@@ -36,6 +36,7 @@ async def create_chat_completion(
             stream = await gateway_executor.stream_chat_completion(
                 payload,
                 db,
+                api_token_id=api_token.id,
                 session_key=session_key,
                 tier=tier,
                 max_cost=budget,

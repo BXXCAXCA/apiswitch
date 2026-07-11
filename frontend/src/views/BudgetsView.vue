@@ -12,6 +12,7 @@
           <n-form-item-gi label="已用额度"><n-input-number v-model:value="form.spent_amount" :min="0" /></n-form-item-gi>
           <n-form-item-gi label="币种"><n-input v-model:value="form.currency" /></n-form-item-gi>
           <n-form-item-gi label="告警阈值 %"><n-input-number v-model:value="form.alert_threshold_percent" :min="1" :max="100" /></n-form-item-gi>
+          <n-form-item-gi label="超限处理"><n-select v-model:value="form.enforcement_action" :options="enforcementOptions" /></n-form-item-gi>
           <n-form-item-gi label="启用"><n-switch v-model:value="form.enabled" /></n-form-item-gi>
         </n-grid>
         <n-button type="primary" :loading="saving" @click="handleCreate">创建预算</n-button>
@@ -27,14 +28,14 @@
 <script setup lang="ts">
 import { h, onMounted, reactive, ref } from 'vue'
 import { NButton, NCard, NDataTable, NForm, NFormItemGi, NGrid, NH1, NInput, NInputNumber, NPopconfirm, NProgress, NSelect, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
-import { createBudget, deleteBudget, fetchBudgets, updateBudget, type Budget } from '../api/budgets'
+import { createBudget, deleteBudget, fetchBudgets, updateBudget, type Budget, type BudgetCreate } from '../api/budgets'
 
 const message = useMessage()
 const budgets = ref<Budget[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const updatingId = ref<number | null>(null)
-const form = reactive({
+const form = reactive<BudgetCreate>({
   name: '',
   scope: 'global',
   scope_id: '',
@@ -42,13 +43,20 @@ const form = reactive({
   currency: 'USD',
   enabled: true,
   spent_amount: 0,
-  alert_threshold_percent: 80
+  alert_threshold_percent: 80,
+  enforcement_action: 'warn_only'
 })
 const scopeOptions = [
   { label: '全局', value: 'global' },
   { label: 'Provider', value: 'provider' },
   { label: 'API Token', value: 'api_token' },
   { label: '统一模型', value: 'unified_model' }
+]
+const enforcementOptions = [
+  { label: '仅告警', value: 'warn_only' },
+  { label: '拒绝请求', value: 'reject' },
+  { label: '降级至免费', value: 'fallback_to_free' },
+  { label: '降级至最低成本', value: 'fallback_to_cheapest' }
 ]
 const columns = [
   { title: '名称', key: 'name' },
@@ -73,6 +81,7 @@ const columns = [
     }
   },
   { title: '告警阈值', key: 'alert_threshold_percent', render: (row: Budget) => `${row.alert_threshold_percent}%` },
+  { title: '超限处理', key: 'enforcement_action' },
   {
     title: '操作',
     key: 'actions',
@@ -115,7 +124,8 @@ async function handleCreate() {
       currency: form.currency,
       enabled: form.enabled,
       spent_amount: form.spent_amount,
-      alert_threshold_percent: form.alert_threshold_percent
+      alert_threshold_percent: form.alert_threshold_percent,
+      enforcement_action: form.enforcement_action
     })
     form.name = ''
     form.scope = 'global'
@@ -125,6 +135,7 @@ async function handleCreate() {
     form.enabled = true
     form.spent_amount = 0
     form.alert_threshold_percent = 80
+    form.enforcement_action = 'warn_only'
     message.success('预算已创建')
     await loadBudgets()
   } finally {

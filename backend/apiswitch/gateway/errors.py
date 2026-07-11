@@ -8,3 +8,7 @@ class UnifiedModelNotFoundError(GatewayError):
 
 class NoAvailableCandidateError(GatewayError):
     error_type = "no_available_candidate"
+
+
+class BudgetExceededError(GatewayError):
+    error_type = "budget_exceeded"

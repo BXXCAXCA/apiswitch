@@ -16,6 +16,7 @@ from apiswitch.schemas.gateway import AnthropicMessagesRequest, ChatCompletionRe
 from apiswitch.services.routing_controls import estimate_token_count
 from apiswitch.services.session_affinity import record_session_affinity
 from apiswitch.services.usage_accounting import record_usage_history
+from apiswitch.services.budget_enforcement import enforce_candidate_budgets
 
 
 class GatewayExecutor:
@@ -59,6 +60,7 @@ class GatewayExecutor:
                 estimated_input_tokens=estimated_input_tokens,
                 estimated_output_tokens=estimated_output_tokens,
             )
+            candidates = enforce_candidate_budgets(db, candidates, api_token_id=api_token_id, unified_model=request.model)
             for selected in candidates:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
@@ -217,6 +219,7 @@ class GatewayExecutor:
                 estimated_input_tokens=estimated_input_tokens,
                 estimated_output_tokens=request.max_tokens,
             )
+            candidates = enforce_candidate_budgets(db, candidates, api_token_id=api_token_id, unified_model=request.model)
             for selected in candidates:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
@@ -333,6 +336,7 @@ class GatewayExecutor:
         self,
         request: ChatCompletionRequest,
         db: Session,
+        api_token_id: int | None = None,
         session_key: str | None = None,
         tier: str | None = None,
         max_cost: float | None = None,
@@ -363,6 +367,7 @@ class GatewayExecutor:
             estimated_input_tokens=estimated_input_tokens,
             estimated_output_tokens=estimated_output_tokens,
         )
+        candidates = enforce_candidate_budgets(db, candidates, api_token_id=api_token_id, unified_model=request.model)
 
         async def generator() -> AsyncIterator[bytes]:
             last_error: ProviderError | None = None

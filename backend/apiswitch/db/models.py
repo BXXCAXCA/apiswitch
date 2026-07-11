@@ -251,6 +251,7 @@ class Budget(Base, TimestampMixin):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     spent_amount: Mapped[float] = mapped_column(Float, default=0.0)
     alert_threshold_percent: Mapped[int] = mapped_column(Integer, default=80)
+    enforcement_action: Mapped[str] = mapped_column(String(32), default="warn_only")
 
 
 class FileCache(Base, TimestampMixin):

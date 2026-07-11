@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import ModelPricing, UsageHistory
+from apiswitch.services.budget_enforcement import accumulate_budget_spend
 
 
 def _find_pricing(db: Session, provider_id: int, model_name: str) -> ModelPricing | None:
@@ -78,4 +79,11 @@ def record_usage_history(
         estimated_cost=estimated_cost,
     )
     db.add(item)
+    accumulate_budget_spend(
+        db,
+        estimated_cost=estimated_cost,
+        api_token_id=api_token_id,
+        provider_id=provider_id,
+        unified_model=unified_model,
+    )
     return item, estimated_cost
