@@ -42,9 +42,9 @@ These controls refine routing inside a Unified Model. They do not bypass the Uni
 ### OpenAI Responses
 
 - `POST /v1/responses`
-  - Non-streaming Responses-compatible JSON.
+  - Non-streaming Responses-compatible JSON and Responses SSE when `stream=true`.
   - Converts Responses input to the shared Chat execution path.
-  - `stream=true` currently returns `responses_streaming_not_implemented`.
+  - Streaming emits lifecycle and `response.output_text.delta` events.
 
 ### Anthropic Messages
 
@@ -72,7 +72,6 @@ These controls refine routing inside a Unified Model. They do not bypass the Uni
 
 ## Planned protocol expansion
 
-- Responses streaming
 - WebSocket bridge
 - Files
 - Images generations / edits

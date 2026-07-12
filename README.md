@@ -16,7 +16,7 @@ The expanded roadmap adds a compact OmniRoute-inspired architecture without tryi
 - Unified Model internal routing modes: `static`, `combo`, and `auto`.
 - Explainable scoring using health, quota, cost, latency, task fit, context fit, stability, and manual priority.
 - Pricing, Token accounting, usage history, quota snapshots, session affinity, and request budget controls.
-- Planned protocol expansion for Responses streaming, Embeddings, Gemini `v1beta`, WebSocket, Files, Images, Audio, Moderations, Rerank, Search, Batches, Video, and Music.
+- Planned protocol expansion for WebSocket, Files, Images, Audio, Moderations, Rerank, Search, Batches, Video, and Music.
 - One-click Claude Code Profile writing.
 
 See `docs/omniroute-inspired-roadmap.md` for the detailed design and phased implementation order.
@@ -92,7 +92,7 @@ The current codebase provides:
 - FastAPI app and OpenAPI groups
 - SQLite, SQLAlchemy models, Alembic migrations, and development bootstrap seed
 - OpenAI Chat Completions routed through Unified Models
-- OpenAI Responses converted to Chat Completions and routed through Unified Models
+- OpenAI Responses, including streaming, converted to Chat Completions and routed through Unified Models
 - Streaming `text/event-stream` support for `/v1/chat/completions`
 - Anthropic Messages routed through Unified Models
 - Gateway API Token authentication for `/v1/*`

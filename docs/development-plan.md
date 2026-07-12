@@ -91,7 +91,7 @@ Completed:
 
 Remaining stabilization work:
 
-- Add Responses streaming conversion
+- Add streaming usage/cost accounting and first-token latency measurement
 - Replace placeholder secret encryption
 - Add Admin API authentication or strict local-only protection
 - Connect Agent configs to real import/export backup workflows

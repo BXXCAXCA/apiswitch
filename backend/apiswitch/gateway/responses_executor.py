@@ -2,6 +2,8 @@ import time
 import uuid
 from datetime import datetime
 from typing import Any
+import json
+from collections.abc import AsyncIterator
 
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from apiswitch.services.session_affinity import record_session_affinity
 from apiswitch.services.usage_accounting import record_usage_history
 from apiswitch.services.budget_enforcement import enforce_candidate_budgets
 from apiswitch.services.quota_accounting import record_adapter_quota_snapshot
+from apiswitch.gateway.executor import gateway_executor
 
 
 async def execute_responses(
@@ -28,9 +31,6 @@ async def execute_responses(
     tier: str | None = None,
     max_cost: float | None = None,
 ) -> dict[str, Any]:
-    if request.stream:
-        raise ProviderError("Responses streaming is not implemented yet", "responses_streaming_not_implemented")
-
     start_time = time.perf_counter()
     request_id = f"req_{uuid.uuid4().hex}"
     last_error: Exception | None = None
@@ -182,3 +182,61 @@ async def execute_responses(
             log.final_upstream_model = final_candidate.upstream_model
         db.commit()
         raise
+
+
+async def stream_responses(
+    request: ResponsesRequest,
+    db: Session,
+    api_token_id: int | None = None,
+    session_key: str | None = None,
+    tier: str | None = None,
+    max_cost: float | None = None,
+) -> AsyncIterator[bytes]:
+    """Translate the routed OpenAI Chat SSE stream into Responses SSE events."""
+    chat_request = responses_to_chat_completion(request).model_copy(update={"stream": True})
+    response_id = f"resp_{uuid.uuid4().hex[:24]}"
+    message_id = f"msg_{uuid.uuid4().hex[:16]}"
+
+    async def event(name: str, payload: dict[str, Any]) -> bytes:
+        return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+
+    async def generator() -> AsyncIterator[bytes]:
+        yield await event("response.created", {"type": "response.created", "response": {"id": response_id, "object": "response", "model": request.model, "status": "in_progress"}})
+        yield await event("response.output_item.added", {"type": "response.output_item.added", "response_id": response_id, "item": {"id": message_id, "type": "message", "role": "assistant", "status": "in_progress", "content": []}})
+        text = ""
+        buffer = ""
+        try:
+            upstream = await gateway_executor.stream_chat_completion(
+                chat_request,
+                db,
+                api_token_id=api_token_id,
+                session_key=session_key,
+                tier=tier,
+                max_cost=max_cost,
+                inbound_protocol="openai_responses_stream",
+            )
+            async for chunk in upstream:
+                buffer += chunk.decode("utf-8", errors="ignore")
+                while "\n\n" in buffer:
+                    raw_event, buffer = buffer.split("\n\n", 1)
+                    data_lines = [line[5:].strip() for line in raw_event.splitlines() if line.startswith("data:")]
+                    data = "\n".join(data_lines)
+                    if data == "[DONE]":
+                        continue
+                    try:
+                        payload = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    if raw_event.startswith("event: error"):
+                        yield await event("response.failed", {"type": "response.failed", "response": {"id": response_id, "status": "failed", "error": payload if isinstance(payload, dict) else {"message": str(payload)}}})
+                        return
+                    delta = (((payload.get("choices") or [{}])[0].get("delta") or {}).get("content")) if isinstance(payload, dict) else None
+                    if delta:
+                        text += str(delta)
+                        yield await event("response.output_text.delta", {"type": "response.output_text.delta", "response_id": response_id, "item_id": message_id, "delta": str(delta)})
+            yield await event("response.output_text.done", {"type": "response.output_text.done", "response_id": response_id, "item_id": message_id, "text": text})
+            yield await event("response.completed", {"type": "response.completed", "response": {"id": response_id, "object": "response", "model": request.model, "status": "completed", "output": [{"id": message_id, "type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": text}]}]}})
+        except (GatewayError, ProviderError) as exc:
+            yield await event("response.failed", {"type": "response.failed", "response": {"id": response_id, "status": "failed", "error": {"type": getattr(exc, "error_type", "gateway_error"), "message": str(exc)}}})
+
+    return generator()

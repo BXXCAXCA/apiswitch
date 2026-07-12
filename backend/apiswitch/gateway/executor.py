@@ -343,6 +343,7 @@ class GatewayExecutor:
         session_key: str | None = None,
         tier: str | None = None,
         max_cost: float | None = None,
+        inbound_protocol: str = "openai_chat_stream",
     ) -> AsyncIterator[bytes]:
         started_at = datetime.utcnow()
         start_time = time.perf_counter()
@@ -351,7 +352,7 @@ class GatewayExecutor:
         log = RequestLog(
             request_id=request_id,
             started_at=started_at,
-            inbound_protocol="openai_chat_stream",
+            inbound_protocol=inbound_protocol,
             unified_model=request.model,
             success=False,
             cache_hit=False,

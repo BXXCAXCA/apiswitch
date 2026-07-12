@@ -48,11 +48,17 @@ def test_responses_unknown_model_returns_error(client, gateway_headers):
     assert response.json()["detail"]["type"] == "unified_model_not_found"
 
 
-def test_responses_streaming_not_implemented(client, gateway_headers):
+def test_responses_streaming_translates_chat_sse(client, gateway_headers):
     response = client.post(
         "/v1/responses",
         headers=gateway_headers,
         json={"model": "code-best", "input": "hello", "stream": True},
     )
-    assert response.status_code == 502
-    assert response.json()["detail"]["type"] == "responses_streaming_not_implemented"
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: response.created" in response.text
+    assert "event: response.output_text.delta" in response.text
+    assert "Mock response from APISwitch." in response.text
+    assert "event: response.completed" in response.text
+    logs = client.get("/api/admin/logs").json()["items"]
+    assert any(item["inbound_protocol"] == "openai_responses_stream" for item in logs)
