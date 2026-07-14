@@ -21,21 +21,19 @@ The expanded roadmap adds a compact OmniRoute-inspired architecture without tryi
 
 See `docs/omniroute-inspired-roadmap.md` for the detailed design and phased implementation order.
 
-## Handoff documents
+## Project documents
 
 For continuing development in a new conversation, read these first:
 
 - `docs/confirmed-requirements.md` - confirmed product scope, priorities, constraints, and acceptance baseline.
-- `docs/hand-off-context.md` - project context, requirements, architecture, current state, caveats, and next tasks.
-- `docs/conversation-archive.md` - chronological archive of the available conversation and development history.
 - `docs/development-plan.md` - milestone progress and remaining work.
-- `docs/omniroute-inspired-roadmap.md` - new Provider, protocol, Auto-Combo, scoring, quota, and cost direction.
+- `docs/omniroute-inspired-roadmap.md` - Provider, protocol, Auto-Combo, scoring, quota, and cost direction.
 - `docs/api.md` - current gateway and admin API list.
 
 Suggested prompt for a new conversation:
 
 ```text
-请先阅读 BXXCAXCA/apiswitch 仓库中的 docs/confirmed-requirements.md、docs/hand-off-context.md、docs/conversation-archive.md、docs/development-plan.md、docs/omniroute-inspired-roadmap.md、docs/api.md 和 README.md，然后继续 APISwitch 开发。保持统一模型驱动，默认直接提交到 main，回答用中文，不要重复询问已确定需求。先跑通并修复 pytest、npm run test、npm run build，再实现 Provider Connection/Node、成本与配额、Auto-Combo 和扩展协议。
+请先阅读 BXXCAXCA/apiswitch 仓库中的 docs/confirmed-requirements.md、docs/development-plan.md、docs/omniroute-inspired-roadmap.md、docs/api.md 和 README.md，然后继续 APISwitch 开发。保持统一模型驱动，默认直接提交到 main，回答用中文，不要重复询问已确定需求。先跑通并修复 pytest、npm run test、npm run build，再实现 Provider Connection/Node、成本与配额、Auto-Combo 和扩展协议。
 ```
 
 ## Tech stack
