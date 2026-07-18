@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import ModelPricing, UsageHistory
@@ -12,7 +12,11 @@ def _find_pricing(db: Session, provider_id: int, model_name: str) -> ModelPricin
             ModelPricing.provider_id == provider_id,
             ModelPricing.model_name == model_name,
         )
-        .order_by(ModelPricing.effective_at.desc(), ModelPricing.id.desc())
+        .order_by(
+            case((ModelPricing.source == "manual", 1), else_=0).desc(),
+            ModelPricing.effective_at.desc(),
+            ModelPricing.id.desc(),
+        )
         .limit(1)
     )
     if pricing is not None:
@@ -23,7 +27,11 @@ def _find_pricing(db: Session, provider_id: int, model_name: str) -> ModelPricin
             ModelPricing.provider_id.is_(None),
             ModelPricing.model_name == model_name,
         )
-        .order_by(ModelPricing.effective_at.desc(), ModelPricing.id.desc())
+        .order_by(
+            case((ModelPricing.source == "manual", 1), else_=0).desc(),
+            ModelPricing.effective_at.desc(),
+            ModelPricing.id.desc(),
+        )
         .limit(1)
     )
 

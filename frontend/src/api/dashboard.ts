@@ -10,6 +10,13 @@ export interface DashboardSummary {
   monthly_budget_used: number
   monthly_budget_limit: number
   recent_errors: string[]
+  provider_instances: number
+  available_upstream_models: number
+  unified_models: number
+  auxiliary_models: number
+  requests_24h: number
+  cost_24h: number
+  budget_alerts: number
 }
 
 export function fetchDashboardSummary() {

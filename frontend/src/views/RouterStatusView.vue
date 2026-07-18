@@ -1,0 +1,26 @@
+<template>
+  <n-space vertical size="large"><n-space justify="space-between"><n-h1>路由状态</n-h1><n-button :loading="loading" @click="refresh">刷新</n-button></n-space><n-alert type="info">矩阵和候选原因由后端实时计算；Dry-run 只使用 Mock 响应，不会调用真实供应商。</n-alert>
+    <n-card><n-form inline><n-form-item label="统一模型"><n-select v-model:value="selectedModelId" :options="modelOptions" style="min-width:240px"/></n-form-item></n-form>
+      <n-tabs type="line" animated>
+        <n-tab-pane name="matrix" tab="协议映射矩阵"><n-empty v-if="!matrix.length" description="请选择统一模型"/><n-data-table v-else :columns="matrixColumns" :data="matrix"/></n-tab-pane>
+        <n-tab-pane name="candidates" tab="Combo 候选"><n-data-table :columns="candidateColumns" :data="selectedModel?.candidates||[]"/></n-tab-pane>
+        <n-tab-pane name="health" tab="健康 / 熔断 / 额度"><n-grid responsive="screen" :cols="'1 l:3'" :x-gap="16"><n-gi><n-card title="健康"><n-data-table :columns="healthColumns" :data="healthRows"/></n-card></n-gi><n-gi><n-card title="熔断"><n-data-table :columns="breakerColumns" :data="breakerRows"/></n-card></n-gi><n-gi><n-card title="额度"><n-data-table :columns="quotaColumns" :data="quotaRows"/></n-card></n-gi></n-grid></n-tab-pane>
+      </n-tabs>
+    </n-card>
+    <n-card title="协议转换 Dry-run 测试台"><n-space vertical><n-select v-model:value="protocol" :options="protocols"/><n-input v-model:value="requestText" type="textarea" :autosize="{minRows:7}"/><n-button type="primary" :loading="running" @click="run">运行转换测试</n-button><n-alert v-if="error" type="error">{{error}}</n-alert>
+      <n-grid v-if="result" responsive="screen" :cols="'1 l:2'" :x-gap="16" :y-gap="16"><n-gi v-for="field in resultFields" :key="field.key"><n-card :title="field.label"><n-code :code="JSON.stringify((result as any)[field.key],null,2)" language="json" word-wrap/></n-card></n-gi></n-grid>
+    </n-space></n-card>
+  </n-space>
+</template>
+<script setup lang="ts">
+import { computed,onMounted,ref } from 'vue'
+import { NAlert,NButton,NCard,NCode,NDataTable,NEmpty,NForm,NFormItem,NGi,NGrid,NH1,NInput,NSelect,NSpace,NTabPane,NTabs } from 'naive-ui'
+import { getJson,postJson } from '../api/client'
+const protocols=['openai_chat','openai_responses','anthropic_messages','gemini_v1beta','embeddings','images','audio','moderations','rerank','search','batches','websocket','video','music'].map(value=>({label:value,value}));const protocol=ref('openai_chat');const requestText=ref('{\n  "model": "your-unified-model",\n  "messages": [{"role":"user","content":"hello"}]\n}');const status=ref<any>({models:[],matrix:{},health:[],circuit_breakers:[],quotas:[]});const selectedModelId=ref<number|null>(null);const result=ref<any>();const error=ref('');const loading=ref(false);const running=ref(false)
+const selectedModel=computed(()=>status.value.models?.find((x:any)=>x.id===selectedModelId.value));const modelOptions=computed(()=>status.value.models?.map((x:any)=>({label:x.name,value:x.id}))||[]);const matrix=computed(()=>status.value.matrix?.[String(selectedModelId.value)]||[]);const upstreamIds=computed(()=>new Set((selectedModel.value?.candidates||[]).map((x:any)=>x.upstream_model_id)));const healthRows=computed(()=>status.value.health.filter((x:any)=>upstreamIds.value.has(x.upstream_model_id)));const breakerRows=computed(()=>status.value.circuit_breakers.filter((x:any)=>upstreamIds.value.has(x.upstream_model_id)));const quotaRows=computed(()=>status.value.quotas.filter((x:any)=>upstreamIds.value.has(x.upstream_model_id)))
+const resultFields=[{key:'ingress',label:'入口原文'},{key:'canonical',label:'Canonical Request'},{key:'auxiliary',label:'辅助链规划'},{key:'candidates',label:'Combo 候选与原因'},{key:'upstream_request',label:'上游请求'},{key:'upstream_response',label:'Mock 上游响应'},{key:'final_response',label:'最终入口响应'},{key:'error',label:'结构化错误'}]
+async function refresh(){loading.value=true;try{status.value=await getJson('/api/admin/router/status');if(!selectedModelId.value&&status.value.models?.[0])selectedModelId.value=status.value.models[0].id}finally{loading.value=false}}
+async function run(){running.value=true;error.value='';result.value=undefined;try{const request=JSON.parse(requestText.value);result.value=await postJson('/api/admin/router/convert/test',{protocol:protocol.value,model:request.model,request})}catch(cause){error.value=cause instanceof Error?cause.message:String(cause)}finally{running.value=false}}
+const matrixColumns:any[]=[{title:'入口协议',key:'protocol'},{title:'所需能力',key:'required_capability'},{title:'状态',key:'status'},{title:'原因',key:'reason'}];const candidateColumns:any[]=[{title:'优先级',key:'priority'},{title:'权重',key:'weight'},{title:'供应商',key:'provider',render:(r:any)=>r.provider_instance?.name},{title:'上游模型',key:'upstream',render:(r:any)=>r.upstream_model?.model_id},{title:'启用',key:'enabled'}];const healthColumns:any[]=[{title:'上游',key:'upstream_model_id'},{title:'成功/失败',key:'counts',render:(r:any)=>`${r.success_count}/${r.failure_count}`},{title:'平均延迟',key:'avg_latency_ms'}];const breakerColumns:any[]=[{title:'上游',key:'upstream_model_id'},{title:'状态',key:'state'},{title:'连续失败',key:'consecutive_failures'}];const quotaColumns:any[]=[{title:'上游',key:'upstream_model_id'},{title:'请求',key:'remaining_requests'},{title:'Token',key:'remaining_tokens'},{title:'余额',key:'remaining_credit'}]
+onMounted(refresh)
+</script>

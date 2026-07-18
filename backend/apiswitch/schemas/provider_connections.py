@@ -44,6 +44,27 @@ class ProviderConnectionRead(BaseModel):
     updated_at: datetime
 
 
+class GoogleOAuthStartRequest(BaseModel):
+    """Configuration needed to begin a local Google/Gemini OAuth consent flow."""
+
+    name: str = Field(min_length=1, max_length=128)
+    client_id: str = Field(min_length=1, max_length=512)
+    project_id: str = Field(min_length=1, max_length=256)
+    client_secret: str | None = Field(default=None, max_length=512)
+    redirect_uri: str = Field(min_length=1, max_length=2048)
+    account_label: str | None = Field(default=None, max_length=128)
+    scopes: list[str] = Field(
+        default_factory=lambda: ["https://www.googleapis.com/auth/cloud-platform"],
+        min_length=1,
+    )
+    priority: int = Field(default=100, ge=0, le=1000)
+
+
+class GoogleOAuthStartResult(BaseModel):
+    connection_id: int
+    authorization_url: str
+
+
 class ProviderNodeCreate(BaseModel):
     name: str
     base_url: str

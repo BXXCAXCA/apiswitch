@@ -1,91 +1,63 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from apiswitch import __version__
-from apiswitch.api.admin import (
-    accounting,
-    agents,
-    api_tokens,
-    budgets,
-    dashboard,
-    logs,
-    provider_catalog,
-    provider_connections,
-    providers,
-    router_health,
-    settings as admin_settings,
-    unified_models,
-    webdav,
-)
-from apiswitch.api.gateway import chat_completions, embeddings, gemini_v1beta, messages, models, responses
+from apiswitch.api.admin import v2
+from apiswitch.api.deps import require_admin_access
 from apiswitch.db.bootstrap import init_database
+from apiswitch.gateway.v2 import router as gateway_router
+from apiswitch.routing.engine import structured_error
+
+
+class DuplicateV1PrefixMiddleware:
+    """Accept clients that append ``/v1/...`` to a Base URL ending in ``/v1``.
+
+    Several desktop clients keep one OpenAI-style Base URL while switching the
+    selected API format to Anthropic Messages.  Those clients can request
+    ``/v1/v1/messages``.  Normalize exactly one duplicated version prefix and
+    continue through the ordinary authenticated gateway route.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") in {"http", "websocket"}:
+            path = str(scope.get("path") or "")
+            if path == "/v1/v1" or path.startswith("/v1/v1/"):
+                scope = dict(scope)
+                scope["path"] = path[3:]
+                raw_path = scope.get("raw_path")
+                if isinstance(raw_path, bytes):
+                    scope["raw_path"] = raw_path[3:]
+        await self.app(scope, receive, send)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_database(); yield
 
 
 def create_app() -> FastAPI:
-    init_database()
-
-    app = FastAPI(
-        title="APISwitch",
-        version=__version__,
-        description="Local-first AI API gateway, model router, and control panel.",
-        openapi_tags=[
-            {"name": "System", "description": "Runtime and health endpoints."},
-            {"name": "Gateway - OpenAI Chat", "description": "OpenAI Chat Completions compatible API."},
-            {"name": "Gateway - OpenAI Responses", "description": "OpenAI Responses compatible API."},
-            {"name": "Gateway - Anthropic Messages", "description": "Anthropic Messages compatible API."},
-            {"name": "Gateway - Embeddings", "description": "OpenAI-compatible Embeddings API."},
-            {"name": "Gateway - Gemini v1beta", "description": "Gemini generateContent compatibility API."},
-            {"name": "Gateway - Models", "description": "Gateway-visible model listing."},
-            {"name": "Admin - Dashboard", "description": "Dashboard metrics for the Web UI."},
-            {"name": "Admin - Providers", "description": "Provider management and catalog."},
-            {
-                "name": "Admin - Provider Connections",
-                "description": "Multi-account credentials and provider node management.",
-            },
-            {"name": "Admin - Accounting", "description": "Pricing, quota snapshots, and usage history."},
-            {"name": "Admin - Unified Models", "description": "Unified model management."},
-            {"name": "Admin - Router Health", "description": "Candidate scoring and health state."},
-            {"name": "Admin - Logs", "description": "Request logs and statistics."},
-            {"name": "Admin - API Tokens", "description": "Gateway API token management."},
-            {"name": "Admin - Budgets", "description": "Budget limits and spend tracking."},
-            {"name": "Admin - WebDAV", "description": "WebDAV sync profile management."},
-            {"name": "Admin - Agents", "description": "Local Agent config management."},
-            {"name": "Admin - Settings", "description": "System settings."},
-        ],
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    @app.get("/health", tags=["System"])
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "service": "apiswitch", "version": __version__}
-
-    app.include_router(chat_completions.router)
-    app.include_router(responses.router)
-    app.include_router(messages.router)
-    app.include_router(embeddings.router)
-    app.include_router(gemini_v1beta.router)
-    app.include_router(models.router)
-    app.include_router(dashboard.router)
-    app.include_router(provider_catalog.router)
-    app.include_router(providers.router)
-    app.include_router(provider_connections.router)
-    app.include_router(accounting.router)
-    app.include_router(unified_models.router)
-    app.include_router(router_health.router)
-    app.include_router(logs.router)
-    app.include_router(api_tokens.router)
-    app.include_router(budgets.router)
-    app.include_router(webdav.router)
-    app.include_router(agents.router)
-    app.include_router(admin_settings.router)
+    app=FastAPI(title="APISwitch",version=__version__,lifespan=lifespan)
+    app.add_middleware(DuplicateV1PrefixMiddleware)
+    @app.exception_handler(Exception)
+    async def unexpected(_, exc:Exception):
+        return JSONResponse(status_code=500,content=structured_error("provider_unavailable","网关内部错误","internal"))
+    @app.get("/health")
+    async def health():return {"status":"ok","service":"apiswitch","version":__version__}
+    app.include_router(gateway_router)
+    app.include_router(v2.router,dependencies=[Depends(require_admin_access)])
+    from apiswitch.config import settings
+    dist=Path(settings.frontend_dist_dir).expanduser() if settings.frontend_dist_dir else Path(__file__).resolve().parents[2]/"frontend"/"dist"
+    if (dist/"index.html").is_file(): app.mount("/ui",StaticFiles(directory=str(dist),html=True),name="frontend")
     return app
 
 
-app = create_app()
+app=create_app()

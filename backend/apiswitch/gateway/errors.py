@@ -10,5 +10,9 @@ class NoAvailableCandidateError(GatewayError):
     error_type = "no_available_candidate"
 
 
+class CapabilityNotSupportedError(GatewayError):
+    error_type = "not_supported_by_candidate"
+
+
 class BudgetExceededError(GatewayError):
     error_type = "budget_exceeded"

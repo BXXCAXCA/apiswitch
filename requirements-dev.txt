@@ -3,3 +3,4 @@ pytest-asyncio>=0.23,<1.0
 pytest-cov>=5.0,<6.0
 ruff>=0.5,<1.0
 mypy>=1.10,<2.0
+pyinstaller>=6.10,<7.0

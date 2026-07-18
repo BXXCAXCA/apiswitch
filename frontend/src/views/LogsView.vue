@@ -1,117 +1,37 @@
 <template>
-  <n-space vertical size="large">
-    <n-space justify="space-between" align="center">
-      <n-h1>调用日志</n-h1>
-      <n-space align="center">
-        <n-select v-model:value="limit" :options="limitOptions" style="width: 120px" @update:value="loadLogs" />
-        <n-button :loading="loading" @click="loadLogs">刷新</n-button>
-      </n-space>
-    </n-space>
-
-    <n-card title="最近请求">
-      <n-data-table :columns="columns" :data="logs" :loading="loading" />
+  <n-space vertical size="large"><n-space justify="space-between" align="center"><n-h1>调用日志</n-h1><n-button :loading="loading" @click="load">刷新</n-button></n-space>
+    <n-alert type="info">默认不保存完整 Prompt/Response。详情保留候选决策、基础辅助链、客户端名称、转换入口和错误类型。</n-alert>
+    <n-card title="筛选">
+      <div class="filter-grid"><n-date-picker v-model:value="filters.range" type="datetimerange" clearable/><n-select v-model:value="filters.inbound_protocol" clearable :options="protocolOptions" placeholder="协议"/><n-select v-model:value="filters.unified_model" clearable filterable :options="unifiedOptions" placeholder="统一模型"/><n-select v-model:value="filters.provider_instance_id" clearable :options="providerOptions" placeholder="供应商"/><n-select v-model:value="filters.upstream_model_id" clearable filterable :options="upstreamOptions" placeholder="上游模型"/><n-select v-model:value="filters.success" clearable :options="statusOptions" placeholder="状态"/><div class="cost-range"><n-input-number v-model:value="filters.min_cost" clearable :min="0" placeholder="最低成本"/><span>—</span><n-input-number v-model:value="filters.max_cost" clearable :min="0" placeholder="最高成本"/></div><n-select data-testid="log-client-filter" v-model:value="filters.api_token_id" clearable :options="tokenOptions" placeholder="客户端名称（可选）"/></div>
+      <n-space style="margin-top:14px"><n-button type="primary" @click="load">应用筛选</n-button><n-button @click="resetFilters">重置</n-button></n-space>
     </n-card>
-
-    <n-modal v-model:show="detailVisible" preset="card" title="日志详情" style="max-width: 900px">
-      <n-descriptions v-if="selectedLog" bordered :column="2" size="small">
-        <n-descriptions-item label="Request ID">{{ selectedLog.request_id }}</n-descriptions-item>
-        <n-descriptions-item label="协议">{{ selectedLog.inbound_protocol }}</n-descriptions-item>
-        <n-descriptions-item label="统一模型">{{ selectedLog.unified_model }}</n-descriptions-item>
-        <n-descriptions-item label="Provider">{{ selectedLog.final_provider || '-' }}</n-descriptions-item>
-        <n-descriptions-item label="上游模型">{{ selectedLog.final_upstream_model || '-' }}</n-descriptions-item>
-        <n-descriptions-item label="状态">{{ selectedLog.success ? '成功' : '失败' }}</n-descriptions-item>
-        <n-descriptions-item label="开始时间">{{ selectedLog.started_at }}</n-descriptions-item>
-        <n-descriptions-item label="结束时间">{{ selectedLog.finished_at || '-' }}</n-descriptions-item>
-        <n-descriptions-item label="延迟">{{ formatLatency(selectedLog.latency_ms) }}</n-descriptions-item>
-        <n-descriptions-item label="首 Token 延迟">{{ formatLatency(selectedLog.first_token_latency_ms) }}</n-descriptions-item>
-        <n-descriptions-item label="输入 Tokens">{{ selectedLog.input_tokens ?? '-' }}</n-descriptions-item>
-        <n-descriptions-item label="输出 Tokens">{{ selectedLog.output_tokens ?? '-' }}</n-descriptions-item>
-        <n-descriptions-item label="错误类型">{{ selectedLog.error_type || '-' }}</n-descriptions-item>
-        <n-descriptions-item label="错误信息">{{ selectedLog.error_message || '-' }}</n-descriptions-item>
-      </n-descriptions>
-      <n-h3>Retry Chain</n-h3>
-      <n-code :code="retryChainText" language="json" word-wrap />
-    </n-modal>
+    <n-card><n-empty v-if="!loading&&!items.length" description="暂无匹配日志"/><n-data-table v-else data-testid="log-table" :columns="columns" :data="items" :loading="loading" :pagination="{pageSize:20}" :scroll-x="1530"/></n-card>
+    <n-modal v-model:show="showDetail" preset="card" title="调用详情" style="width:min(900px,92vw)"><n-code :code="JSON.stringify(detail,null,2)" language="json" word-wrap/></n-modal>
   </n-space>
 </template>
-
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue'
-import { NButton, NCard, NCode, NDataTable, NDescriptions, NDescriptionsItem, NH1, NH3, NModal, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
-import { fetchRequestLogs, type RequestLogItem } from '../api/logs'
-
-const message = useMessage()
-const logs = ref<RequestLogItem[]>([])
-const loading = ref(false)
-const limit = ref(50)
-const detailVisible = ref(false)
-const selectedLog = ref<RequestLogItem | null>(null)
-const limitOptions = [
-  { label: '最近 20 条', value: 20 },
-  { label: '最近 50 条', value: 50 },
-  { label: '最近 100 条', value: 100 },
-  { label: '最近 200 条', value: 200 }
-]
-const retryChainText = computed(() => JSON.stringify(selectedLog.value?.retry_chain ?? {}, null, 2))
-
-const columns = [
-  { title: '时间', key: 'started_at', render: (row: RequestLogItem) => formatTime(row.started_at) },
-  {
-    title: '状态',
-    key: 'success',
-    render(row: RequestLogItem) {
-      return h(NTag, { type: row.success ? 'success' : 'error', size: 'small' }, { default: () => row.success ? '成功' : '失败' })
-    }
-  },
-  { title: '协议', key: 'inbound_protocol' },
-  { title: '统一模型', key: 'unified_model' },
-  { title: 'Provider', key: 'final_provider' },
-  { title: '上游模型', key: 'final_upstream_model' },
-  { title: '延迟', key: 'latency_ms', render: (row: RequestLogItem) => formatLatency(row.latency_ms) },
-  { title: 'Tokens', key: 'tokens', render: (row: RequestLogItem) => `${row.input_tokens ?? '-'} / ${row.output_tokens ?? '-'}` },
-  {
-    title: '错误',
-    key: 'error_type',
-    render(row: RequestLogItem) {
-      if (!row.error_type) return '-'
-      return h(NTag, { type: 'error', size: 'small' }, { default: () => row.error_type })
-    }
-  },
-  {
-    title: '操作',
-    key: 'actions',
-    render(row: RequestLogItem) {
-      return h(NButton, { size: 'small', onClick: () => openDetail(row) }, { default: () => '详情' })
-    }
-  }
-]
-
-function formatTime(value: string | null) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
-
-function formatLatency(value: number | null) {
-  if (value === null || value === undefined) return '-'
-  return `${Math.round(value)} ms`
-}
-
-function openDetail(row: RequestLogItem) {
-  selectedLog.value = row
-  detailVisible.value = true
-}
-
-async function loadLogs() {
-  loading.value = true
-  try {
-    const response = await fetchRequestLogs(limit.value)
-    logs.value = response.items
-  } catch (error) {
-    message.error(`加载日志失败：${error instanceof Error ? error.message : '未知错误'}`)
-  } finally {
-    loading.value = false
-  }
-}
-
-onMounted(loadLogs)
+import { computed,h,onMounted,reactive,ref } from 'vue'
+import { NAlert,NButton,NCard,NCode,NDataTable,NDatePicker,NEmpty,NH1,NInputNumber,NModal,NSelect,NSpace,NTag } from 'naive-ui'
+import { getJson } from '../api/client'
+import { chinaDatePickerValueToIso, formatChinaDateTime } from '../dateTime'
+const items=ref<any[]>([]);const unified=ref<any[]>([]);const providers=ref<any[]>([]);const upstream=ref<any[]>([]);const tokens=ref<any[]>([]);const loading=ref(false);const showDetail=ref(false);const detail=ref<any>()
+const filters=reactive<any>({range:null,success:null,unified_model:null,provider_instance_id:null,upstream_model_id:null,inbound_protocol:null,api_token_id:null,min_cost:null,max_cost:null})
+const statusOptions=[{label:'成功',value:'true'},{label:'失败',value:'false'}];const protocolOptions=['openai_chat','openai_responses','anthropic_messages','gemini_v1beta','embeddings','files','images','audio','moderations','rerank','search','batches','websocket','video','music'].map(value=>({label:value,value}));const unifiedOptions=computed(()=>unified.value.map(x=>({label:x.name,value:x.name})));const providerOptions=computed(()=>providers.value.map(x=>({label:x.name,value:x.id})));const upstreamOptions=computed(()=>upstream.value.map(x=>({label:`${x.provider_name} / ${x.model_id}`,value:x.id})));const tokenOptions=computed(()=>tokens.value.map(x=>({label:x.name,value:x.id})))
+function query(){const params=new URLSearchParams();for(const key of ['success','unified_model','provider_instance_id','upstream_model_id','inbound_protocol','api_token_id','min_cost','max_cost'])if(filters[key]!==null&&filters[key]!==undefined&&filters[key]!=='')params.set(key,String(filters[key]));if(filters.range){params.set('started_after',chinaDatePickerValueToIso(filters.range[0]));params.set('started_before',chinaDatePickerValueToIso(filters.range[1]))}return params.toString()}
+async function load(){loading.value=true;try{items.value=await getJson(`/api/admin/logs?${query()}`)}finally{loading.value=false}}
+async function initialize(){[unified.value,providers.value,tokens.value]=await Promise.all([getJson('/api/admin/unified-models'),getJson('/api/admin/provider-instances'),getJson('/api/admin/tokens')]) as any;upstream.value=(await Promise.all(providers.value.map(async p=>(await getJson<any[]>(`/api/admin/provider-instances/${p.id}/upstream-models`)).map(x=>({...x,provider_name:p.name}))))).flat();await load()}
+function openDetail(row:any){detail.value=row;showDetail.value=true}
+function resetFilters(){Object.assign(filters,{range:null,success:null,unified_model:null,provider_instance_id:null,upstream_model_id:null,inbound_protocol:null,api_token_id:null,min_cost:null,max_cost:null});void load()}
+const clientName=(r:any)=>r.api_token_name||tokens.value.find(x=>x.id===r.api_token_id)?.name||'-'
+const columns:any[]=[{title:'请求 ID',key:'request_id',width:220,ellipsis:{tooltip:true}},{title:'协议',key:'inbound_protocol',width:150},{title:'供应商',key:'provider_name',width:160,render:(r:any)=>r.provider_name||'-'},{title:'上游模型',key:'upstream_model_name',width:200,ellipsis:{tooltip:true},render:(r:any)=>r.upstream_model_name||'-'},{title:'统一模型',key:'unified_model',width:180},{title:'客户端名称',key:'api_token_name',width:160,ellipsis:{tooltip:true},render:clientName},{title:'状态',key:'success',width:80,render:(r:any)=>h(NTag,{type:r.success?'success':'error'},{default:()=>r.success?'成功':'失败'})},{title:'延迟',key:'latency',width:110,render:(r:any)=>`${Number(r.latency_ms||0).toFixed(1)} ms`},{title:'时间（UTC+8）',key:'started_at',width:190,render:(r:any)=>formatChinaDateTime(r.started_at)},{title:'操作',key:'actions',width:80,fixed:'right',render:(r:any)=>h(NButton,{size:'small',onClick:()=>openDetail(r)},{default:()=> '详情'})}]
+onMounted(initialize)
 </script>
+<style scoped>
+.filter-grid{display:grid;grid-template-columns:minmax(320px,1.6fr) repeat(3,minmax(170px,1fr));gap:12px;align-items:center}
+.filter-grid>*{min-width:0}
+.filter-grid :deep(.n-base-selection-placeholder),.filter-grid :deep(.n-input__placeholder){color:#667085!important;opacity:1}
+.filter-grid :deep(.n-base-selection),.filter-grid :deep(.n-input){--n-border:1px solid #b8c0cc!important;--n-border-hover:1px solid #18a058!important}
+.cost-range{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px;align-items:center}
+@media (max-width:1500px){.filter-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+@media (max-width:680px){.filter-grid{grid-template-columns:1fr}}
+</style>

@@ -46,3 +46,34 @@ def _rewrite_single_event(event: str, unified_model: str, metadata: dict) -> str
                 payload.setdefault("apiswitch", {}).update(metadata)
         output_lines.append(f"data: {json.dumps(payload, ensure_ascii=False)}")
     return "\n".join(output_lines)
+
+
+def inspect_openai_sse_event(chunk: bytes) -> tuple[str, dict[str, int]]:
+    """Return text deltas and optional token usage from one normalized SSE event."""
+    text_parts: list[str] = []
+    usage: dict[str, int] = {}
+    for line in chunk.decode("utf-8", errors="replace").splitlines():
+        if not line.startswith("data:"):
+            continue
+        raw = line[len("data:") :].strip()
+        if raw == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        choices = payload.get("choices", [])
+        if isinstance(choices, list) and choices:
+            delta = choices[0].get("delta", {}) if isinstance(choices[0], dict) else {}
+            content = delta.get("content") if isinstance(delta, dict) else None
+            if isinstance(content, str):
+                text_parts.append(content)
+        raw_usage = payload.get("usage", {})
+        if isinstance(raw_usage, dict):
+            for field in ("prompt_tokens", "completion_tokens"):
+                value = raw_usage.get(field)
+                if isinstance(value, int):
+                    usage[field] = value
+    return "".join(text_parts), usage

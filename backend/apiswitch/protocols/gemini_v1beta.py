@@ -1,4 +1,5 @@
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from apiswitch.schemas.gateway import ChatCompletionRequest, ChatMessage, GeminiGenerateContentRequest
@@ -21,6 +22,8 @@ def _parts_to_text(parts: Any) -> str:
 def gemini_request_to_chat(
     model: str,
     request: GeminiGenerateContentRequest,
+    *,
+    stream: bool = False,
 ) -> ChatCompletionRequest:
     messages: list[ChatMessage] = []
     if request.systemInstruction:
@@ -37,7 +40,7 @@ def gemini_request_to_chat(
     return ChatCompletionRequest(
         model=model,
         messages=messages,
-        stream=False,
+        stream=stream,
         temperature=config.get("temperature"),
         top_p=config.get("topP"),
         max_tokens=config.get("maxOutputTokens"),
@@ -72,3 +75,37 @@ def chat_response_to_gemini(response: dict[str, Any], model: str) -> dict[str, A
         "responseId": response.get("id"),
         "apiswitch": response.get("apiswitch", {}),
     }
+
+
+async def chat_stream_to_gemini_sse(chunks: AsyncIterator[bytes], model: str) -> AsyncIterator[bytes]:
+    """Translate the shared OpenAI streaming executor to Gemini REST SSE."""
+    async for chunk in chunks:
+        for line in chunk.decode("utf-8", errors="replace").splitlines():
+            if not line.startswith("data:"):
+                continue
+            raw = line[len("data:") :].strip()
+            if raw == "[DONE]":
+                continue
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            choices = payload.get("choices", [])
+            choice = choices[0] if isinstance(choices, list) and choices else {}
+            delta = choice.get("delta", {}) if isinstance(choice, dict) else {}
+            text = delta.get("content") if isinstance(delta, dict) else None
+            finish_reason = choice.get("finish_reason") if isinstance(choice, dict) else None
+            if not isinstance(text, str) and not finish_reason:
+                continue
+            candidate: dict[str, Any] = {
+                "content": {"role": "model", "parts": [{"text": text or ""}]},
+                "index": 0,
+            }
+            if finish_reason:
+                candidate["finishReason"] = "STOP" if finish_reason == "stop" else str(finish_reason).upper()
+            response: dict[str, Any] = {"candidates": [candidate], "modelVersion": model}
+            if payload.get("apiswitch"):
+                response["apiswitch"] = payload["apiswitch"]
+            yield f"data: {json.dumps(response, ensure_ascii=False)}\n\n".encode("utf-8")

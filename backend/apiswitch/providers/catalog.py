@@ -1,5 +1,20 @@
 from typing import Any
 
+
+_PROTOCOL_CAPABILITIES = {
+    "chat": "text",
+    "messages": "text",
+    "responses": "text",
+    "embeddings": "embeddings",
+    "images": "images",
+    "audio": "audio",
+    "moderations": "moderations",
+    "rerank": "rerank",
+    "search": "search",
+    "video": "video",
+    "music": "music",
+}
+
 PROVIDER_CATALOG: list[dict[str, Any]] = [
     {
         "type": "mock",
@@ -27,6 +42,16 @@ PROVIDER_CATALOG: list[dict[str, Any]] = [
         "default_base_url": "https://api.anthropic.com/v1",
         "auth_methods": ["api_key"],
         "protocols": ["messages", "models"],
+        "free_tier": False,
+        "quota_query": False,
+        "status": "implemented",
+    },
+    {
+        "type": "sensenova",
+        "display_name": "SenseNova Token",
+        "default_base_url": "https://token.sensenova.cn/v1",
+        "auth_methods": ["api_key"],
+        "protocols": ["chat", "messages", "models"],
         "free_tier": False,
         "quota_query": False,
         "status": "implemented",
@@ -221,12 +246,61 @@ PROVIDER_CATALOG: list[dict[str, Any]] = [
         "quota_query": True,
         "status": "planned",
     },
+    {
+        "type": "qianfan",
+        "display_name": "Baidu Qianfan",
+        "default_base_url": "https://qianfan.baidubce.com/v2",
+        "auth_methods": ["api_key"],
+        "protocols": ["chat", "models", "search"],
+        "capabilities": ["text", "tools", "search"],
+        "model_tags": ["china", "enterprise", "search"],
+        "free_tier": True,
+        "quota_query": True,
+        "status": "planned",
+    },
+    {
+        "type": "hunyuan",
+        "display_name": "Tencent Hunyuan",
+        "default_base_url": "https://api.hunyuan.cloud.tencent.com/v1",
+        "auth_methods": ["api_key"],
+        "protocols": ["chat", "models", "embeddings"],
+        "capabilities": ["text", "vision", "tools", "embeddings"],
+        "model_tags": ["china", "general", "vision"],
+        "free_tier": True,
+        "quota_query": True,
+        "status": "planned",
+    },
+    {
+        "type": "modelscope",
+        "display_name": "ModelScope Deployment",
+        "default_base_url": "http://127.0.0.1:8000/v1",
+        "auth_methods": ["api_key", "anonymous"],
+        "protocols": ["chat", "models", "embeddings", "images", "audio", "video"],
+        "capabilities": ["text", "vision", "embeddings", "images", "audio", "video"],
+        "model_tags": ["open-source", "self-hosted", "china"],
+        "free_tier": True,
+        "quota_query": False,
+        "status": "planned",
+    },
 ]
 
 
+def _normalize_catalog_item(item: dict[str, Any]) -> dict[str, Any]:
+    result = dict(item)
+    protocols = result.get("protocols", [])
+    result.setdefault(
+        "capabilities",
+        sorted({_PROTOCOL_CAPABILITIES[protocol] for protocol in protocols if protocol in _PROTOCOL_CAPABILITIES}),
+    )
+    result.setdefault("model_tags", ["general"])
+    result["oauth"] = "oauth" in result.get("auth_methods", [])
+    return result
+
+
 def list_provider_catalog() -> list[dict[str, Any]]:
-    return [dict(item) for item in PROVIDER_CATALOG]
+    return [_normalize_catalog_item(item) for item in PROVIDER_CATALOG]
 
 
 def get_provider_catalog_item(provider_type: str) -> dict[str, Any] | None:
-    return next((dict(item) for item in PROVIDER_CATALOG if item["type"] == provider_type), None)
+    item = next((item for item in PROVIDER_CATALOG if item["type"] == provider_type), None)
+    return _normalize_catalog_item(item) if item is not None else None

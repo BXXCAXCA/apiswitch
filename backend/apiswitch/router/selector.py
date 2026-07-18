@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import (
@@ -15,7 +15,11 @@ from apiswitch.db.models import (
     UnifiedModel,
     UnifiedModelCandidate,
 )
-from apiswitch.gateway.errors import NoAvailableCandidateError, UnifiedModelNotFoundError
+from apiswitch.gateway.errors import (
+    CapabilityNotSupportedError,
+    NoAvailableCandidateError,
+    UnifiedModelNotFoundError,
+)
 from apiswitch.providers.catalog import get_provider_catalog_item
 from apiswitch.router.circuit_breaker import is_candidate_allowed
 from apiswitch.router.auto_combo import materialize_auto_candidates
@@ -60,7 +64,11 @@ def _latest_pricing(db: Session, provider_id: int, model_name: str) -> ModelPric
     item = db.scalar(
         select(ModelPricing)
         .where(ModelPricing.provider_id == provider_id, ModelPricing.model_name == model_name)
-        .order_by(ModelPricing.effective_at.desc(), ModelPricing.id.desc())
+        .order_by(
+            case((ModelPricing.source == "manual", 1), else_=0).desc(),
+            ModelPricing.effective_at.desc(),
+            ModelPricing.id.desc(),
+        )
         .limit(1)
     )
     if item is not None:
@@ -68,7 +76,11 @@ def _latest_pricing(db: Session, provider_id: int, model_name: str) -> ModelPric
     return db.scalar(
         select(ModelPricing)
         .where(ModelPricing.provider_id.is_(None), ModelPricing.model_name == model_name)
-        .order_by(ModelPricing.effective_at.desc(), ModelPricing.id.desc())
+        .order_by(
+            case((ModelPricing.source == "manual", 1), else_=0).desc(),
+            ModelPricing.effective_at.desc(),
+            ModelPricing.id.desc(),
+        )
         .limit(1)
     )
 
@@ -183,6 +195,7 @@ def list_ranked_candidates(
     max_cost: float | None = None,
     estimated_input_tokens: int | None = None,
     estimated_output_tokens: int | None = None,
+    required_capabilities: set[str] | None = None,
 ) -> list[SelectedCandidate]:
     unified_model = db.scalar(
         select(UnifiedModel).where(
@@ -216,7 +229,12 @@ def list_ranked_candidates(
     blocked_count = 0
     budget_filtered_count = 0
     tier_filtered_count = 0
+    capability_filtered_count = 0
     for candidate, provider, health in rows:
+        candidate_capabilities = set((candidate.capabilities_json or {}).get("capabilities", []))
+        if required_capabilities and not required_capabilities.issubset(candidate_capabilities):
+            capability_filtered_count += 1
+            continue
         if not is_candidate_allowed(db, candidate.id):
             blocked_count += 1
             continue
@@ -323,11 +341,18 @@ def list_ranked_candidates(
         scored.append((affinity_match, selected))
 
     if not scored:
+        if capability_filtered_count == len(rows):
+            labels = ", ".join(sorted(required_capabilities or set()))
+            raise CapabilityNotSupportedError(
+                f"No candidate for unified model '{unified_model_name}' supports required capability: {labels}"
+            )
         details = [f"{blocked_count} blocked by circuit breaker"]
         if budget_filtered_count:
             details.append(f"{budget_filtered_count} filtered by request budget")
         if tier_filtered_count:
             details.append(f"{tier_filtered_count} filtered by tier")
+        if capability_filtered_count:
+            details.append(f"{capability_filtered_count} filtered by required capability")
         raise NoAvailableCandidateError(
             f"No available candidates for unified model: {unified_model_name}; " + ", ".join(details)
         )

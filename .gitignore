@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.spec
+build/
 .venv/
 venv/
 .env
@@ -16,11 +18,13 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+*.db.bak-*
 data/
 logs/
 cache/
 backups/
 exports/
+apiswitch-files/
 
 # Node
 node_modules/
@@ -33,3 +37,5 @@ coverage/
 .idea/
 *.swp
 .DS_Store
+.codeartsdoer/
+*.apsbak

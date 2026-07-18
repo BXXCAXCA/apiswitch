@@ -2,6 +2,7 @@
 testpaths = ["backend/tests"]
 pythonpath = ["backend"]
 asyncio_mode = "auto"
+python_files = ["v2_test_*.py"]
 
 [tool.ruff]
 line-length = 100

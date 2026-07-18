@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     port: int = 8080
     database_url: str = "sqlite:///./apiswitch.db"
     auth_enabled: bool = False
+    admin_auth_enabled: bool = False
+    admin_token: str | None = None
+    master_key: str | None = None
+    file_storage_dir: str = "./apiswitch-files"
+    file_max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    frontend_dist_dir: str | None = None
     reload: bool = False
     stream_failure_mode: str = Field(default="strict_compat_mode")
 

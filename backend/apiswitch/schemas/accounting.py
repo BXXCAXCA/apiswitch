@@ -31,9 +31,27 @@ class ModelPricingRead(BaseModel):
     output_cost_per_million: float | None
     cached_input_cost_per_million: float | None
     currency: str
+    source: str
+    source_url: str | None
     effective_at: datetime
     created_at: datetime
     updated_at: datetime
+
+
+class ModelPricingCatalogEntry(BaseModel):
+    model_name: str
+    input_cost_per_million: float | None = Field(default=None, ge=0)
+    output_cost_per_million: float | None = Field(default=None, ge=0)
+    cached_input_cost_per_million: float | None = Field(default=None, ge=0)
+    currency: str = "USD"
+    effective_at: datetime | None = None
+
+
+class ModelPricingCatalogImport(BaseModel):
+    provider_id: int | None = None
+    source: str = Field(min_length=1, max_length=64)
+    source_url: str | None = Field(default=None, max_length=1024)
+    entries: list[ModelPricingCatalogEntry] = Field(min_length=1)
 
 
 class QuotaSnapshotCreate(BaseModel):

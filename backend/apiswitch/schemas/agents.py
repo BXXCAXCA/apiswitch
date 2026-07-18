@@ -63,3 +63,17 @@ class ClaudeCodeProfileWriteResult(BaseModel):
     powershell_command: str
     posix_command: str
     message: str
+
+
+class ClaudeCodeProfileRestoreRequest(BaseModel):
+    profile_name: str = "apiswitch"
+    backup_path: str | None = None
+
+
+class ClaudeCodeProfileRestoreResult(BaseModel):
+    ok: bool
+    profile_name: str
+    settings_path: str
+    restored_from: str
+    backup_path: str | None = None
+    message: str

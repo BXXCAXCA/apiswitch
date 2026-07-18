@@ -1,41 +1,30 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import AdminLayout from '../layouts/AdminLayout.vue'
 import DashboardView from '../views/DashboardView.vue'
 import ProvidersView from '../views/ProvidersView.vue'
-import ProviderConnectionsView from '../views/ProviderConnectionsView.vue'
-import UnifiedModelsView from '../views/UnifiedModelsView.vue'
 import ModelDiscoveryView from '../views/ModelDiscoveryView.vue'
-import RouterHealthView from '../views/RouterHealthView.vue'
-import LogsView from '../views/LogsView.vue'
+import UnifiedModelsView from '../views/UnifiedModelsView.vue'
+import AuxiliaryModelsView from '../views/AuxiliaryModelsView.vue'
+import RouterStatusView from '../views/RouterStatusView.vue'
 import TokensView from '../views/TokensView.vue'
-import SettingsView from '../views/SettingsView.vue'
+import LogsView from '../views/LogsView.vue'
+import AccountingV2View from '../views/AccountingV2View.vue'
 import BudgetsView from '../views/BudgetsView.vue'
-import AccountingView from '../views/AccountingView.vue'
-import WebDAVView from '../views/WebDAVView.vue'
-import AgentsView from '../views/AgentsView.vue'
+import AgentsV2View from '../views/AgentsV2View.vue'
+import SystemSettingsV2View from '../views/SystemSettingsV2View.vue'
 
 export const router = createRouter({
-  history: createWebHistory(),
-  routes: [
-    {
-      path: '/',
-      component: AdminLayout,
-      children: [
-        { path: '', redirect: '/dashboard' },
-        { path: 'dashboard', component: DashboardView },
-        { path: 'providers', component: ProvidersView },
-        { path: 'provider-connections', component: ProviderConnectionsView },
-        { path: 'unified-models', component: UnifiedModelsView },
-        { path: 'model-discovery', component: ModelDiscoveryView },
-        { path: 'router-health', component: RouterHealthView },
-        { path: 'logs', component: LogsView },
-        { path: 'accounting', component: AccountingView },
-        { path: 'tokens', component: TokensView },
-        { path: 'settings', component: SettingsView },
-        { path: 'budgets', component: BudgetsView },
-        { path: 'webdav', component: WebDAVView },
-        { path: 'agents', component: AgentsView }
-      ]
-    }
-  ]
+  history: createWebHashHistory(import.meta.env.BASE_URL),
+  routes: [{ path: '/', component: AdminLayout, children: [
+    { path: '', redirect: '/dashboard' }, { path: 'dashboard', component: DashboardView },
+    { path: 'providers', component: ProvidersView }, { path: 'upstream-models', component: ModelDiscoveryView },
+    { path: 'unified-models', component: UnifiedModelsView }, { path: 'auxiliary-models', component: AuxiliaryModelsView },
+    { path: 'tokens', component: TokensView },
+    { path: 'router-status', component: RouterStatusView },
+    { path: 'logs', component: LogsView },
+    { path: 'accounting', component: AccountingV2View },
+    { path: 'budgets', component: BudgetsView },
+    { path: 'agents', component: AgentsV2View },
+    { path: 'settings', component: SystemSettingsV2View }
+  ] }]
 })

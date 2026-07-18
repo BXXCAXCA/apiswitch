@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from typing import Any, Literal
+
 from pydantic import BaseModel
 
 
@@ -34,3 +36,18 @@ class WebDAVConnectionResult(BaseModel):
     ok: bool
     message: str
     status_code: int | None = None
+
+
+class WebDAVImportOptions(BaseModel):
+    conflict_strategy: Literal["abort", "remote_wins", "local_wins"] = "abort"
+
+
+class WebDAVSyncLogRead(BaseModel):
+    id: int
+    profile_id: int
+    operation: str
+    success: bool
+    conflict_strategy: str | None
+    summary: dict[str, Any]
+    error_message: str | None
+    created_at: datetime

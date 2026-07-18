@@ -16,7 +16,12 @@ def _get_or_create_health(db: Session, candidate_id: int) -> ProviderHealth:
     return health
 
 
-def record_candidate_success(db: Session, candidate_id: int, latency_ms: float) -> None:
+def record_candidate_success(
+    db: Session,
+    candidate_id: int,
+    latency_ms: float,
+    first_token_latency_ms: float | None = None,
+) -> None:
     health = _get_or_create_health(db, candidate_id)
     health.success_count += 1
     health.consecutive_failures = 0
@@ -27,6 +32,13 @@ def record_candidate_success(db: Session, candidate_id: int, latency_ms: float) 
         health.avg_latency_ms = (health.avg_latency_ms * 0.8) + (latency_ms * 0.2)
     health.p50_latency_ms = health.avg_latency_ms
     health.p95_latency_ms = max(health.p95_latency_ms or 0, latency_ms)
+    if first_token_latency_ms is not None:
+        if health.first_token_latency_ms is None:
+            health.first_token_latency_ms = first_token_latency_ms
+        else:
+            health.first_token_latency_ms = (health.first_token_latency_ms * 0.8) + (
+                first_token_latency_ms * 0.2
+            )
     health.updated_at = datetime.utcnow()
     record_breaker_success(db, candidate_id)
 

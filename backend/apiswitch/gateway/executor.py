@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from apiswitch.db.models import Provider, RequestLog
 from apiswitch.gateway.errors import GatewayError, NoAvailableCandidateError
-from apiswitch.gateway.streaming import rewrite_openai_sse_model
+from apiswitch.gateway.streaming import inspect_openai_sse_event, rewrite_openai_sse_model
 from apiswitch.providers.base import ProviderError
 from apiswitch.providers.factory import build_selected_provider_adapter
 from apiswitch.router.health import record_candidate_failure, record_candidate_success
@@ -380,6 +380,9 @@ class GatewayExecutor:
                 final_candidate = selected
                 attempt_started = time.perf_counter()
                 stream_started = False
+                first_token_latency_ms: float | None = None
+                streamed_text: list[str] = []
+                streamed_usage: dict[str, int] = {}
                 try:
                     provider_config = db.get(Provider, selected.provider_id)
                     if provider_config is None:
@@ -409,11 +412,22 @@ class GatewayExecutor:
                         metadata,
                     ):
                         stream_started = True
+                        text, usage = inspect_openai_sse_event(chunk)
+                        if text:
+                            streamed_text.append(text)
+                            if first_token_latency_ms is None:
+                                first_token_latency_ms = (time.perf_counter() - attempt_started) * 1000
+                        streamed_usage.update(usage)
                         yield chunk
 
                     attempt_latency_ms = (time.perf_counter() - attempt_started) * 1000
                     total_latency_ms = (time.perf_counter() - start_time) * 1000
-                    record_candidate_success(db, selected.candidate_id, attempt_latency_ms)
+                    record_candidate_success(
+                        db,
+                        selected.candidate_id,
+                        attempt_latency_ms,
+                        first_token_latency_ms=first_token_latency_ms,
+                    )
                     record_session_affinity(
                         db,
                         unified_model_name=request.model,
@@ -438,7 +452,26 @@ class GatewayExecutor:
                     log.final_upstream_model = selected.upstream_model
                     log.success = True
                     log.latency_ms = total_latency_ms
+                    log.first_token_latency_ms = first_token_latency_ms
                     log.retry_chain_json = {"attempts": attempts}
+                    input_tokens = streamed_usage.get("prompt_tokens", estimated_input_tokens)
+                    output_tokens = streamed_usage.get(
+                        "completion_tokens", estimate_token_count("".join(streamed_text))
+                    )
+                    log.input_tokens = input_tokens
+                    log.output_tokens = output_tokens
+                    _, estimated_cost = record_usage_history(
+                        db,
+                        request_id=request_id,
+                        api_token_id=api_token_id,
+                        provider_connection_id=selected.provider_connection_id,
+                        provider_id=selected.provider_id,
+                        unified_model=request.model,
+                        upstream_model=selected.upstream_model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                    )
+                    log.estimated_cost = estimated_cost
                     db.commit()
                     return
                 except ProviderError as exc:

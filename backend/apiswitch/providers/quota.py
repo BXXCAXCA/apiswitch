@@ -28,10 +28,15 @@ def quota_from_headers(headers: dict[str, str] | None) -> dict[str, object] | No
     reset_seconds = number("x-ratelimit-reset-requests", "retry-after")
     if reset_seconds is not None and reset_seconds >= 0:
         reset_at = datetime.utcnow() + timedelta(seconds=reset_seconds)
+    safe_raw = {
+        key: value
+        for key, value in values.items()
+        if key == "retry-after" or "ratelimit" in key or "rate-limit" in key or "quota" in key
+    }
     return {
         "remaining_requests": int(remaining_requests) if remaining_requests is not None else None,
         "remaining_tokens": int(remaining_tokens) if remaining_tokens is not None else None,
         "remaining_credit": remaining_credit,
         "reset_at": reset_at,
-        "raw": values,
+        "raw": safe_raw,
     }

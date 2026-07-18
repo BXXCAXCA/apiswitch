@@ -26,6 +26,11 @@ def _seed_provider_model(
                 enabled=True,
             )
         )
+    else:
+        known = set((existing.capabilities_json or {}).get("capabilities", []))
+        expected = set(capabilities)
+        if not expected.issubset(known):
+            existing.capabilities_json = {"capabilities": sorted(known | expected)}
 
 
 def _seed_unified_route(
@@ -65,6 +70,11 @@ def _seed_unified_route(
                 capabilities_json={"capabilities": capabilities},
             )
         )
+    else:
+        existing = set((candidate.capabilities_json or {}).get("capabilities", []))
+        expected = set(capabilities)
+        if not expected.issubset(existing):
+            candidate.capabilities_json = {"capabilities": sorted(existing | expected)}
 
 
 def seed_default_data(db: Session) -> None:
@@ -83,7 +93,7 @@ def seed_default_data(db: Session) -> None:
         db.add(provider)
         db.flush()
 
-    _seed_provider_model(db, provider.id, "mock-chat", ["text", "tools", "files"])
+    _seed_provider_model(db, provider.id, "mock-chat", ["text", "tools", "files", "images", "audio", "moderations", "rerank", "search", "video", "music"])
     _seed_provider_model(db, provider.id, "mock-embedding", ["embeddings"])
     _seed_unified_route(
         db,
@@ -91,7 +101,7 @@ def seed_default_data(db: Session) -> None:
         name="code-best",
         description="Default mock coding route",
         upstream_model="mock-chat",
-        capabilities=["text", "tools", "files"],
+        capabilities=["text", "tools", "files", "images", "audio", "moderations", "rerank", "search", "video", "music"],
     )
     _seed_unified_route(
         db,

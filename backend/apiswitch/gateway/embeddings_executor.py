@@ -55,6 +55,7 @@ async def execute_embeddings(
             max_cost=max_cost,
             estimated_input_tokens=estimated_input_tokens,
             estimated_output_tokens=0,
+            required_capabilities={"embeddings"},
         )
         candidates = enforce_candidate_budgets(db, candidates, api_token_id=api_token_id, unified_model=request.model)
         for selected in candidates:
