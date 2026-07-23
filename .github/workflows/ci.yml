@@ -59,11 +59,23 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  sensitive-scan:
+    name: Sensitive credential scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Scan tracked source and documentation
+        run: python scripts/scan-sensitive.py .
+
   package-windows:
-    name: Windows one-file package
+    name: Windows one-file package and smoke test
     needs:
       - backend
       - frontend
+      - sensitive-scan
     runs-on: windows-latest
     env:
       PYTHONUTF8: '1'
@@ -89,6 +101,11 @@ jobs:
       - name: Build APISwitch.exe
         shell: pwsh
         run: ./scripts/package-desktop.ps1 -Clean
+      - name: Verify packaged health, UI, port fallback, and single instance
+        shell: pwsh
+        run: ./scripts/verify-desktop-package.ps1
+      - name: Scan packaged executable
+        run: python scripts/scan-sensitive.py dist/APISwitch.exe
       - name: Record SHA-256
         shell: pwsh
         run: |
@@ -102,5 +119,6 @@ jobs:
           path: |
             dist/APISwitch.exe
             dist/APISwitch.sha256.txt
+            dist/diagnostics/*.json
           if-no-files-found: error
           retention-days: 14
