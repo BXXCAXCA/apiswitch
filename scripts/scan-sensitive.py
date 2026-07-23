@@ -16,12 +16,21 @@ _PATTERN_TEXT = {
     "GitHub token": r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{30,}\b",
     "GitHub fine-grained token": r"\bgithub_pat_[A-Za-z0-9_]{50,}\b",
     "Slack token": r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b",
-    "Private key block": r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+    "Private key block": (
+        r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----\r?\n"
+        r"[A-Za-z0-9+/=\r\n]{64,}"
+        r"-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+    ),
 }
-_PATTERNS = {
-    name: re.compile(expression.encode("ascii"))
+_BYTE_PATTERNS = {
+    name: re.compile(expression.encode("ascii"), re.MULTILINE)
     for name, expression in _PATTERN_TEXT.items()
 }
+_TEXT_PATTERNS = {
+    name: re.compile(expression, re.MULTILINE)
+    for name, expression in _PATTERN_TEXT.items()
+}
+_BINARY_SUFFIXES = {".exe", ".dll", ".bin"}
 _SELF = Path(__file__).resolve()
 _MAX_TEXT_BYTES = 20 * 1024 * 1024
 
@@ -52,18 +61,17 @@ def _scan(path: Path) -> list[str]:
     except OSError as exc:
         return [f"{path}: unreadable ({exc})"]
 
-    # Source files should stay bounded; packaged executables are intentionally scanned in full.
-    if size > _MAX_TEXT_BYTES and path.suffix.lower() not in {".exe", ".dll", ".bin"}:
+    is_binary_artifact = path.suffix.lower() in _BINARY_SUFFIXES
+    if size > _MAX_TEXT_BYTES and not is_binary_artifact:
         return []
 
+    utf16_text = data.decode("utf-16le", errors="ignore") if is_binary_artifact else ""
     findings: list[str] = []
-    for name, pattern in _PATTERNS.items():
-        match = pattern.search(data)
-        if match is None:
-            # PyInstaller and Windows resources can contain UTF-16LE strings.
-            expression = _PATTERN_TEXT[name].encode("utf-16le")
-            if re.search(expression, data) is None:
-                continue
+    for name, pattern in _BYTE_PATTERNS.items():
+        if pattern.search(data) is None and (
+            not utf16_text or _TEXT_PATTERNS[name].search(utf16_text) is None
+        ):
+            continue
         findings.append(f"{path}: {name}")
     return findings
 
