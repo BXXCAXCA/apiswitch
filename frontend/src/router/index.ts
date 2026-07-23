@@ -1,17 +1,18 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import AdminLayout from '../layouts/AdminLayout.vue'
-import DashboardView from '../views/DashboardView.vue'
-import ProvidersView from '../views/ProvidersView.vue'
-import ModelDiscoveryView from '../views/ModelDiscoveryView.vue'
-import UnifiedModelsView from '../views/UnifiedModelsView.vue'
-import AuxiliaryModelsView from '../views/AuxiliaryModelsView.vue'
-import RouterStatusView from '../views/RouterStatusView.vue'
-import TokensView from '../views/TokensView.vue'
-import LogsView from '../views/LogsView.vue'
-import AccountingV2View from '../views/AccountingV2View.vue'
-import BudgetsView from '../views/BudgetsView.vue'
-import AgentsV2View from '../views/AgentsV2View.vue'
-import SystemSettingsV2View from '../views/SystemSettingsV2View.vue'
+
+const DashboardView = () => import('../views/DashboardView.vue')
+const ProvidersView = () => import('../views/ProvidersView.vue')
+const ModelDiscoveryView = () => import('../views/ModelDiscoveryView.vue')
+const UnifiedModelsView = () => import('../views/UnifiedModelsView.vue')
+const AuxiliaryModelsView = () => import('../views/AuxiliaryModelsView.vue')
+const TokensView = () => import('../views/TokensView.vue')
+const RouterStatusView = () => import('../views/RouterStatusView.vue')
+const LogsView = () => import('../views/LogsView.vue')
+const AccountingV2View = () => import('../views/AccountingV2View.vue')
+const BudgetsView = () => import('../views/BudgetsView.vue')
+const AgentsV2View = () => import('../views/AgentsV2View.vue')
+const SystemSettingsV2View = () => import('../views/SystemSettingsV2View.vue')
 
 export const router = createRouter({
   history: createWebHashHistory(import.meta.env.BASE_URL),
