@@ -1,17 +1,15 @@
 """Safe database generation bootstrap (old business data is never migrated)."""
 from __future__ import annotations
 
-import shutil
 import sqlite3
 from contextlib import closing
-from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import inspect, select
+from sqlalchemy import select
 
 from apiswitch import __version__
 from apiswitch.config import settings
-from apiswitch.db.base import Base
+from apiswitch.db.base import Base, utc_now
 from apiswitch.db.models import ApiToken, ApiTokenUnifiedModel, AuxiliarySettings, SchemaMetadata, SystemSetting, UnifiedModel
 from apiswitch.db.session import SessionLocal, engine
 
@@ -46,7 +44,7 @@ def _inspect_sqlite(path: Path) -> tuple[set[str], int | None]:
 
 
 def _reset_legacy_database(path: Path) -> tuple[str, Path]:
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    timestamp = utc_now().strftime("%Y%m%dT%H%M%SZ")
     backup = path.parent / "backups" / f"apiswitch-legacy-{timestamp}.db"
     legacy = path.with_suffix(f".legacy-{timestamp}.db")
     sequence = 1

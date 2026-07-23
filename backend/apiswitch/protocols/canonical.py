@@ -33,6 +33,8 @@ class CanonicalResponse:
     raw: dict[str, Any] | None = None
     mock: bool = False
     upstream_url: str | None = None
+    binary: bytes | None = None
+    media_type: str | None = None
 
     def get(self,key:str,default:Any=None)->Any:return getattr(self,key,default)
     def __getitem__(self,key:str)->Any:return getattr(self,key)
@@ -149,7 +151,28 @@ def from_gemini(model: str, payload: dict[str, Any]) -> CanonicalRequest:
         if mime.startswith("image/"):needs.append("vision")
         if mime.startswith("audio/"):needs.append("audio")
         if part.get("fileData") or part.get("file_data"):needs.append("files")
-    return CanonicalRequest("chat", "gemini_v1beta", model, messages=messages, instructions=(payload.get("systemInstruction") or {}).get("parts", [{}])[0].get("text"), tools=payload.get("tools", []),tool_choice=payload.get("toolConfig"), required_input=list(dict.fromkeys(needs)), required_output=["tools"] if payload.get("tools") else ["text"], stream=bool(payload.get("stream",False)))
+    generation=payload.get("generationConfig") or payload.get("generation_config") or {}
+    if not isinstance(generation,dict):
+        raise ProtocolError("protocol_conversion_unsupported","generationConfig 必须是对象","protocol_conversion")
+    candidate_count=generation.get("candidateCount",generation.get("candidate_count",1))
+    if candidate_count not in (None,1):
+        raise ProtocolError("protocol_conversion_unsupported","当前统一响应只能无损返回一个 Gemini candidate","protocol_conversion")
+    parameters={}
+    for source,target in (
+        ("temperature","temperature"),("topP","top_p"),("topK","top_k"),
+        ("maxOutputTokens","max_tokens"),("stopSequences","stop"),
+        ("frequencyPenalty","frequency_penalty"),("presencePenalty","presence_penalty"),
+        ("seed","seed"),
+    ):
+        if generation.get(source) is not None:parameters[target]=generation[source]
+    response_mime=generation.get("responseMimeType")
+    response_schema=generation.get("responseSchema")
+    if response_mime=="application/json":
+        parameters["response_format"]={"type":"json_schema","json_schema":{"name":"gemini_response","schema":response_schema}} if response_schema else {"type":"json_object"}
+    elif response_mime not in (None,"text/plain"):
+        raise ProtocolError("protocol_conversion_unsupported",f"无法可靠转换 responseMimeType={response_mime}","protocol_conversion")
+    output=["tools"] if payload.get("tools") else (["json"] if response_mime=="application/json" else ["text"])
+    return CanonicalRequest("chat", "gemini_v1beta", model, messages=messages, instructions=(payload.get("systemInstruction") or {}).get("parts", [{}])[0].get("text"), tools=payload.get("tools", []),tool_choice=payload.get("toolConfig"),parameters=parameters, required_input=list(dict.fromkeys(needs)), required_output=output, stream=bool(payload.get("stream",False)))
 
 
 def from_terminal(protocol: str, request_type: str, payload: dict[str, Any]) -> CanonicalRequest:

@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import uuid4
 
 from apiswitch.db.models import ProviderHealth, QuotaSnapshot, UnifiedModel, UpstreamModel, UsageHistory
+from apiswitch.db.base import utc_now
 from apiswitch.db.session import SessionLocal
 from apiswitch.protocols.canonical import CanonicalRequest
 from apiswitch.protocols.canonical import ProtocolError
@@ -50,7 +51,7 @@ def test_all_combo_strategies_and_session_affinity_use_generation_two_models(cli
         unified.combo_strategy="quota_headroom";db.commit()
         assert engine.route_candidates(db,request)[1][0].upstream.id==upstreams[2]["id"]
 
-        now=datetime.utcnow();db.add_all([ProviderHealth(upstream_model_id=item["id"],success_count=index+1,last_success_at=now+timedelta(seconds=index)) for index,item in enumerate(upstreams)])
+        now=utc_now();db.add_all([ProviderHealth(upstream_model_id=item["id"],success_count=index+1,last_success_at=now+timedelta(seconds=index)) for index,item in enumerate(upstreams)])
         unified.combo_strategy="last_known_good";db.commit()
         assert engine.route_candidates(db,request)[1][0].upstream.id==upstreams[2]["id"]
 

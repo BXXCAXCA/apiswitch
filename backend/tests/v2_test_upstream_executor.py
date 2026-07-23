@@ -67,6 +67,196 @@ def test_openai_compatible_http_upstream_is_called_and_normalized(client: TestCl
     assert client.get("/api/admin/logs", params={"min_cost": 0.1}).json() == []
 
 
+def test_terminal_protocols_use_their_real_http_paths_and_native_multipart(client: TestClient, monkeypatch):
+    captured: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path == "/v1/audio/speech":
+            return httpx.Response(200, content=b"mock-audio", headers={"content-type": "audio/mpeg"})
+        return httpx.Response(200, json={"data": [{"ok": True}], "text": "ok"})
+
+    monkeypatch.setattr(executor, "HTTP_TRANSPORT", httpx.MockTransport(upstream))
+    provider_id = _provider(client, "https://terminal.invalid/v1")
+    capabilities = ["text", "embeddings", "images", "audio", "moderation", "rerank", "search", "video", "music"]
+    upstream_model = client.post(
+        f"/api/admin/provider-instances/{provider_id}/upstream-models",
+        json={
+            "model_id": "terminal-all",
+            "input_capabilities_json": capabilities,
+            "output_capabilities_json": capabilities,
+        },
+    ).json()
+    protocols = ["embeddings", "images", "audio", "moderations", "rerank", "search", "video", "music"]
+    unified = client.post(
+        "/api/admin/unified-models",
+        json={"name": f"terminal-{uuid4().hex}", "enabled_protocols": protocols},
+    ).json()
+    client.post(
+        f"/api/admin/unified-models/{unified['id']}/candidates",
+        json={"upstream_model_id": upstream_model["id"]},
+    )
+    headers = _token(client)
+
+    json_cases = [
+        ("/v1/embeddings", "/v1/embeddings", {"input": "hello"}),
+        ("/v1/images/generations", "/v1/images/generations", {"prompt": "cat"}),
+        ("/v1/audio/speech", "/v1/audio/speech", {"input": "hello", "voice": "alloy"}),
+        ("/v1/moderations", "/v1/moderations", {"input": "safe"}),
+        ("/v1/rerank", "/v1/rerank", {"query": "q", "documents": ["d"]}),
+        ("/v1/search", "/v1/search", {"query": "q"}),
+    ]
+    for ingress, upstream_path, body in json_cases:
+        response = client.post(ingress, headers=headers, json={"model": unified["name"], **body})
+        assert response.status_code == 200, (ingress, response.text)
+        request = captured[-1]
+        assert request.url.path == upstream_path
+        forwarded = json.loads(request.content)
+        assert forwarded["model"] == "terminal-all"
+        assert not any(key.startswith("_apiswitch_") for key in forwarded)
+        if ingress == "/v1/audio/speech":
+            assert response.content == b"mock-audio"
+            assert response.headers["content-type"].startswith("audio/mpeg")
+            assert response.headers["x-apiswitch-model"] == unified["name"]
+
+    for ingress, upstream_path in [
+        ("/v1/videos/generations", "/v1/videos/generations"),
+        ("/v1/music/generations", "/v1/music/generations"),
+    ]:
+        response = client.post(ingress, headers=headers, json={"model": unified["name"], "prompt": "demo"})
+        assert response.status_code == 200, (ingress, response.text)
+        assert response.json()["status"] == "completed"
+        assert captured[-1].url.path == upstream_path
+
+    multipart_cases = [
+        ("/v1/images/edits", "/v1/images/edits", "image", "image.png", b"image-edit"),
+        ("/v1/images/variations", "/v1/images/variations", "image", "image.png", b"image-variation"),
+        ("/v1/audio/transcriptions", "/v1/audio/transcriptions", "file", "audio.wav", b"audio-bytes"),
+    ]
+    for ingress, upstream_path, field, filename, content in multipart_cases:
+        response = client.post(
+            ingress,
+            headers=headers,
+            data={"model": unified["name"], "prompt": "native multipart"},
+            files={field: (filename, content, "application/octet-stream")},
+        )
+        assert response.status_code == 200, (ingress, response.text)
+        request = captured[-1]
+        assert request.url.path == upstream_path
+        assert request.headers["content-type"].startswith("multipart/form-data;"), [
+            (item.url.path, item.headers.get("content-type")) for item in captured[-3:]
+        ]
+        assert filename.encode() in request.content
+        assert content in request.content
+        assert b'terminal-all' in request.content
+
+
+def test_native_anthropic_and_gemini_upstreams_preserve_protocol_parameters(client: TestClient, monkeypatch):
+    captured: list[tuple[httpx.Request, dict]] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        captured.append((request, payload))
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={
+                "id": "msg_native",
+                "type": "message",
+                "content": [{"type": "text", "text": "anthropic-native"}],
+                "usage": {"input_tokens": 2, "output_tokens": 3},
+            })
+        return httpx.Response(200, json={
+            "candidates": [{"content": {"role": "model", "parts": [{"text": '{"ok":true}'}]}}],
+            "usageMetadata": {"promptTokenCount": 2, "candidatesTokenCount": 3},
+        })
+
+    monkeypatch.setattr(executor, "HTTP_TRANSPORT", httpx.MockTransport(upstream))
+
+    anthropic_provider = client.post("/api/admin/provider-instances", json={
+        "name": f"native-anthropic-{uuid4().hex}",
+        "template_key": "anthropic",
+        "base_url": "https://anthropic-native.invalid",
+        "api_key": "anthropic-unit-key",
+    }).json()
+    anthropic_upstream = client.post(
+        f"/api/admin/provider-instances/{anthropic_provider['id']}/upstream-models",
+        json={"model_id": "claude-native", "input_capabilities_json": ["text"], "output_capabilities_json": ["text"]},
+    ).json()
+    anthropic_model = client.post("/api/admin/unified-models", json={
+        "name": f"anthropic-native-{uuid4().hex}", "enabled_protocols": ["anthropic_messages"],
+    }).json()
+    client.post(f"/api/admin/unified-models/{anthropic_model['id']}/candidates", json={"upstream_model_id": anthropic_upstream["id"]})
+
+    gemini_provider = client.post("/api/admin/provider-instances", json={
+        "name": f"native-gemini-{uuid4().hex}",
+        "template_key": "gemini",
+        "base_url": "https://gemini-native.invalid",
+        "api_key": "gemini-unit-key",
+    }).json()
+    gemini_upstream = client.post(
+        f"/api/admin/provider-instances/{gemini_provider['id']}/upstream-models",
+        json={"model_id": "gemini-native", "input_capabilities_json": ["text"], "output_capabilities_json": ["text", "json"]},
+    ).json()
+    gemini_model = client.post("/api/admin/unified-models", json={
+        "name": f"gemini-native-{uuid4().hex}", "enabled_protocols": ["gemini_v1beta"],
+    }).json()
+    client.post(f"/api/admin/unified-models/{gemini_model['id']}/candidates", json={"upstream_model_id": gemini_upstream["id"]})
+    token = client.post("/api/admin/tokens", json={
+        "name": "native-provider-protocols",
+        "unified_model_ids": [anthropic_model["id"], gemini_model["id"]],
+    }).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    anthropic = client.post("/v1/messages", headers=headers, json={
+        "model": anthropic_model["name"],
+        "max_tokens": 64,
+        "temperature": 0.2,
+        "stop_sequences": ["END"],
+        "system": "system",
+        "messages": [{"role": "user", "content": "hello"}],
+    })
+    assert anthropic.status_code == 200 and anthropic.json()["content"][0]["text"] == "anthropic-native"
+    anthropic_request, anthropic_payload = captured[-1]
+    assert anthropic_request.url.path == "/v1/messages"
+    assert anthropic_request.headers["x-api-key"] == "anthropic-unit-key"
+    assert anthropic_payload["max_tokens"] == 64
+    assert anthropic_payload["temperature"] == 0.2
+    assert anthropic_payload["stop_sequences"] == ["END"]
+    assert anthropic_payload["system"] == "system"
+
+    gemini = client.post(f"/v1beta/models/{gemini_model['name']}:generateContent", headers=headers, json={
+        "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "topP": 0.8,
+            "topK": 20,
+            "maxOutputTokens": 128,
+            "stopSequences": ["STOP"],
+            "responseMimeType": "application/json",
+            "responseSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+        },
+    })
+    assert gemini.status_code == 200 and gemini.json()["candidates"][0]["content"]["parts"][0]["text"] == '{"ok":true}'
+    gemini_request, gemini_payload = captured[-1]
+    assert gemini_request.url.path == "/v1beta/models/gemini-native:generateContent"
+    assert gemini_request.url.params["key"] == "gemini-unit-key"
+    assert gemini_payload["generationConfig"] == {
+        "temperature": 0.3,
+        "topP": 0.8,
+        "topK": 20,
+        "maxOutputTokens": 128,
+        "stopSequences": ["STOP"],
+        "responseMimeType": "application/json",
+        "responseSchema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+    }
+
+    unsupported = client.post(f"/v1beta/models/{gemini_model['name']}:generateContent", headers=headers, json={
+        "contents": [{"parts": [{"text": "hello"}]}],
+        "generationConfig": {"candidateCount": 2},
+    })
+    assert unsupported.status_code == 400
+    assert unsupported.json()["error"]["type"] == "protocol_conversion_unsupported"
+
+
 def test_openai_compatible_legacy_text_choice_is_normalized_for_plain_chat(client: TestClient, monkeypatch):
     def upstream(_: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={
@@ -389,10 +579,11 @@ def test_circuit_breaker_opens_skips_then_half_open_probe_closes(client: TestCli
     assert client.post("/v1/chat/completions",headers=headers,json=payload).status_code==200
     assert attempted_models.count("breaker-first")==3
 
-    from datetime import datetime,timedelta
+    from datetime import timedelta
+    from apiswitch.db.base import utc_now
     with SessionLocal() as db:
         row=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==models[0]["id"]))
-        row.opened_at=datetime.utcnow()-timedelta(seconds=row.cooldown_seconds+1);db.commit()
+        row.opened_at=utc_now()-timedelta(seconds=row.cooldown_seconds+1);db.commit()
     first_recovers=True
     assert client.post("/v1/chat/completions",headers=headers,json=payload).status_code==200
     assert attempted_models[-1]=="breaker-first"

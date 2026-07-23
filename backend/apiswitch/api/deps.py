@@ -1,11 +1,10 @@
 from collections.abc import Generator
-from datetime import datetime
-
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import ApiToken, SystemSetting
+from apiswitch.db.base import utc_now
 from apiswitch.db.session import SessionLocal
 from apiswitch.security.auth import require_admin_access as _require_admin_access
 from apiswitch.security.tokens import hash_api_token
@@ -79,7 +78,7 @@ def authenticate_gateway_token(
         )
     raw_token = _extract_gateway_token(authorization,x_api_key,x_goog_api_key,query_key)
     api_token = db.scalar(select(ApiToken).where(ApiToken.token_hash == hash_api_token(raw_token)).limit(1))
-    now = datetime.utcnow()
+    now = utc_now()
     if api_token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
