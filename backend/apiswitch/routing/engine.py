@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apiswitch.db.base import utc_now
 from apiswitch.db.models import AuxiliaryModel, AuxiliarySettings, AuxiliaryWorkflow, CircuitBreaker, ProviderHealth, ProviderInstance, QuotaSnapshot, RequestLog, UnifiedModel, UnifiedModelCandidate, UpstreamModel, UsageHistory
 from apiswitch.protocols.canonical import CanonicalRequest, ProtocolError
 
@@ -95,8 +96,8 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
         if upstream.remote_status == "missing": reasons.append("远端模型已消失")
         if not _provider_protocol_supports(provider,request):reasons.append("供应商协议无法可靠执行该请求类型")
         if breaker and breaker.state == "open":
-            if breaker.opened_at and datetime.utcnow() >= breaker.opened_at + timedelta(seconds=breaker.cooldown_seconds or 60):
-                breaker.state="half_open";breaker.half_open_at=datetime.utcnow();db.add(breaker)
+            if breaker.opened_at and utc_now() >= breaker.opened_at + timedelta(seconds=breaker.cooldown_seconds or 60):
+                breaker.state="half_open";breaker.half_open_at=utc_now();db.add(breaker)
             else:reasons.append("熔断器已开启")
         quota=latest_quotas.get(upstream.id)
         quota_values=[value for value in ((quota.remaining_requests if quota else None),(quota.remaining_tokens if quota else None),(quota.remaining_credit if quota else None)) if value is not None]
@@ -198,15 +199,15 @@ def protocol_matrix(db: Session, unified_id: int) -> list[dict[str, Any]]:
 
 def execute_mock(db: Session, request: CanonicalRequest, api_token_id: int | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     request_id = f"req_{uuid.uuid4().hex}"
-    started = datetime.utcnow()
+    started = utc_now()
     try:
         unified, candidates, explanation = route_candidates(db, request)
         auxiliary = plan_auxiliary(db, request, unified)
         selected = candidates[0]
-        log = RequestLog(request_id=request_id, started_at=started, finished_at=datetime.utcnow(), inbound_protocol=request.inbound_protocol, unified_model=request.unified_model, provider_instance_id=selected.provider.id, upstream_model_id=selected.upstream.id, combo_strategy=unified.combo_strategy, candidate_summary_json=explanation, auxiliary_summary_json=auxiliary, api_token_id=api_token_id, success=True, latency_ms=0)
+        log = RequestLog(request_id=request_id, started_at=started, finished_at=utc_now(), inbound_protocol=request.inbound_protocol, unified_model=request.unified_model, provider_instance_id=selected.provider.id, upstream_model_id=selected.upstream.id, combo_strategy=unified.combo_strategy, candidate_summary_json=explanation, auxiliary_summary_json=auxiliary, api_token_id=api_token_id, success=True, latency_ms=0)
         db.add(log); db.commit()
         upstream_request = {"protocol": selected.provider.protocol_type, "model": selected.upstream.model_id, "canonical": request.dump()}
         return {"request_id": request_id, "selected": selected, "upstream_request": upstream_request, "auxiliary": auxiliary, "explanation": explanation}, {"text": "Mock upstream response"}
     except ProtocolError as exc:
-        db.add(RequestLog(request_id=request_id, started_at=started, finished_at=datetime.utcnow(), inbound_protocol=request.inbound_protocol, unified_model=request.unified_model, success=False, error_type=exc.error_type, error_message=str(exc), failure_stage=exc.stage, api_token_id=api_token_id)); db.commit()
+        db.add(RequestLog(request_id=request_id, started_at=started, finished_at=utc_now(), inbound_protocol=request.inbound_protocol, unified_model=request.unified_model, success=False, error_type=exc.error_type, error_message=str(exc), failure_stage=exc.stage, api_token_id=api_token_id)); db.commit()
         raise

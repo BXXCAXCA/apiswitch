@@ -39,7 +39,7 @@ def test_generation_two_provider_model_route_and_protocols(client: TestClient):
 def test_auxiliary_modes_and_remote_missing_reference(client: TestClient):
     provider_id = _provider(client)
     upstream_id = client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models", json={"model_id":"vision","input_capabilities_json":["vision"],"output_capabilities_json":["text"]}).json()["id"]
-    unified_id = client.post("/api/admin/unified-models", json={"name":"vision-stable","enabled_protocols":["openai_chat"]}).json()["id"]
+    client.post("/api/admin/unified-models", json={"name":"vision-stable","enabled_protocols":["openai_chat"]})
     assert client.patch("/api/admin/auxiliary/settings",json={"mode":"global_pool"}).json()["mode"] == "global_pool"
     assert client.post("/api/admin/auxiliary/models",json={"upstream_model_id":upstream_id,"capabilities":["vision"]}).status_code == 201
     assert client.post("/api/admin/auxiliary/workflows",json={"workflow_type":"vision_to_text","input_capability":"vision","output_capability":"text","ordered_steps":[{"input":"vision","output":"text"}]}).status_code == 201
@@ -74,6 +74,9 @@ def test_all_documented_gateway_entrypoints_use_the_token_protected_pipeline(cli
     assert batch.status_code==200 and batch.json()["request_counts"]=={"total":1,"completed":1,"failed":0}
     assert client.get(f"/v1/batches/{batch.json()['id']}",headers=headers).json()["output_file_id"]
     assert client.get(f"/v1/files/{batch.json()['output_file_id']}",headers=headers).status_code==200
+    batch_content=client.get(f"/v1/files/{batch.json()['output_file_id']}/content",headers=headers)
+    assert batch_content.status_code==200 and b'"custom_id":"one"' in batch_content.content
+    assert client.delete(f"/v1/files/{batch_input['id']}",headers=headers).status_code==409
     video=client.post("/v1/videos/generations",headers=headers,json={"model":"all-capabilities","prompt":"x"})
     music=client.post("/v1/music/generations",headers=headers,json={"model":"all-capabilities","prompt":"x"})
     assert video.status_code==music.status_code==200

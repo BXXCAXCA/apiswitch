@@ -8,7 +8,6 @@ from __future__ import annotations
 import time
 import uuid
 from types import SimpleNamespace
-from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -17,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.catalog.templates import get_template
+from apiswitch.db.base import utc_now
 from apiswitch.db.models import ApiToken, Budget, CircuitBreaker, ProviderHealth, ProviderInstance, RequestLog, UnifiedModel, UpstreamModel, UsageHistory
 from apiswitch.protocols.canonical import CanonicalRequest, CanonicalResponse, ProtocolError
 from apiswitch.routing.engine import RouteCandidate, plan_auxiliary, remember_session_candidate, route_candidates
@@ -301,13 +301,16 @@ def _openai_payload(request: CanonicalRequest, model: str) -> dict[str, Any]:
         # and error handling deterministic even for non-OpenAI upstreams.
         payload["stream"] = False
         return payload
-    return {**request.parameters, "model": model}
+    return {key: value for key, value in request.parameters.items() if not key.startswith("_apiswitch_")} | {"model": model}
 
 
 def _anthropic_payload(request: CanonicalRequest, model: str) -> dict[str, Any]:
     if request.request_type != "chat":
         raise ProtocolError("protocol_conversion_unsupported", "Anthropic Messages 供应商不支持该终端能力", "upstream_conversion")
     messages = _messages_for_anthropic(request)
+    unsupported=set(request.parameters)&{"frequency_penalty","presence_penalty","seed","response_format"}
+    if unsupported:
+        raise ProtocolError("protocol_conversion_unsupported","Anthropic Messages 无法可靠表达参数："+", ".join(sorted(unsupported)),"upstream_conversion")
     system = _system_text(request)
     payload: dict[str, Any] = {"model": model, "messages": messages, "max_tokens": request.parameters.get("max_tokens") or 1024, "stream": False}
     for key in ("temperature","top_p","top_k","stop_sequences"):
@@ -328,13 +331,31 @@ def _gemini_payload(request: CanonicalRequest) -> dict[str, Any]:
     if request.tools: payload["tools"]=_tools_for_provider(request,"gemini")
     if request.tool_choice is not None:payload["toolConfig"]=_tool_choice_for_provider(request,"gemini")
     generation={}
-    for source,target in (("temperature","temperature"),("top_p","topP"),("top_k","topK"),("max_tokens","maxOutputTokens"),("stop","stopSequences")):
+    for source,target in (("temperature","temperature"),("top_p","topP"),("top_k","topK"),("max_tokens","maxOutputTokens"),("stop","stopSequences"),("frequency_penalty","frequencyPenalty"),("presence_penalty","presencePenalty"),("seed","seed")):
         if request.parameters.get(source) is not None:generation[target]=request.parameters[source]
+    response_format=request.parameters.get("response_format")
+    if isinstance(response_format,dict):
+        format_type=response_format.get("type")
+        if format_type=="json_object":generation["responseMimeType"]="application/json"
+        elif format_type=="json_schema":
+            generation["responseMimeType"]="application/json"
+            schema=response_format.get("json_schema") or {}
+            generation["responseSchema"]=schema.get("schema",schema)
+        else:raise ProtocolError("protocol_conversion_unsupported",f"Gemini 无法可靠表达 response_format.type={format_type}","upstream_conversion")
     if generation:payload["generationConfig"]=generation
     return payload
 
 
-def _openai_path(request_type: str) -> str:
+def _openai_path(request_type: str, operation: str | None = None) -> str:
+    operation_paths = {
+        "images_generations": "/images/generations",
+        "images_edits": "/images/edits",
+        "images_variations": "/images/variations",
+        "audio_speech": "/audio/speech",
+        "audio_transcriptions": "/audio/transcriptions",
+    }
+    if operation in operation_paths:
+        return operation_paths[operation]
     paths={"chat":"/chat/completions","embeddings":"/embeddings","images":"/images/generations","audio":"/audio/speech","moderations":"/moderations","rerank":"/rerank","search":"/search","batches":"/batches","video":"/videos/generations","music":"/music/generations"}
     if request_type not in paths:raise ProtocolError("protocol_conversion_unsupported",f"OpenAI-Compatible 未定义 {request_type} 上游端点","upstream_conversion")
     return paths[request_type]
@@ -509,7 +530,7 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
     try:proxy=secret_crypto.decrypt(provider.proxy_url_encrypted) if getattr(provider,"proxy_url_encrypted",None) else None
     except SecretCryptoError as exc:raise ProtocolError("credential_decryption_failed",str(exc),"upstream_credentials") from exc
     if protocol in {"openai","openai_compatible"}:
-        url=base+_openai_path(request.request_type); payload=_openai_payload(request,model)
+        url=base+_openai_path(request.request_type, request.parameters.get("_apiswitch_operation")); payload=_openai_payload(request,model)
         if provider.template_key == "sensenova" and request.request_type == "chat":
             # SenseNova compatible-mode v2 follows OpenAI's newer token field
             # and exposes slow-thinking through reasoning_effort.
@@ -527,11 +548,32 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=provider.timeout_seconds,transport=HTTP_TRANSPORT,proxy=proxy) as client:
-                response=await client.post(url,headers=headers,json=payload)
+                multipart=request.parameters.get("_apiswitch_multipart") or []
+                if multipart:
+                    headers.pop("Content-Type", None)
+                    headers.pop("content-type", None)
+                    files=[
+                        (item["field"], (item["filename"], item["content"], item["content_type"]))
+                        for item in multipart
+                    ]
+                    response=await client.post(url,headers=headers,data=payload,files=files)
+                else:
+                    response=await client.post(url,headers=headers,json=payload)
         except httpx.TimeoutException as exc:raise ProtocolError("provider_timeout","上游请求超时","upstream_call",{"provider_instance_id":provider.id}) from exc
         except httpx.HTTPError as exc:raise ProtocolError("provider_unavailable","无法连接上游供应商","upstream_call",{"provider_instance_id":provider.id}) from exc
         if response.status_code>=400:
             raise ProtocolError("upstream_http_error",f"上游返回 HTTP {response.status_code}","upstream_call",{"provider_instance_id":provider.id,"status_code":response.status_code})
+        response_content_type=response.headers.get("content-type","").lower()
+        is_audio_speech=request.parameters.get("_apiswitch_operation")=="audio_speech"
+        if is_audio_speech and "json" not in response_content_type:
+            if not response.content:
+                raise ProtocolError("invalid_upstream_response","语音合成上游返回了空响应","upstream_response")
+            return CanonicalResponse(
+                binary=response.content,
+                media_type=response.headers.get("content-type") or "application/octet-stream",
+                mock=False,
+                upstream_url=url.split("?",1)[0],
+            )
         try:raw=response.json()
         except ValueError as exc:raise ProtocolError("invalid_upstream_response","上游响应不是有效 JSON","upstream_response") from exc
         upstream_error=_upstream_error(raw)
@@ -624,14 +666,14 @@ def _health(db:Session,candidate:RouteCandidate,success:bool,latency_ms:float,er
     row=db.scalar(select(ProviderHealth).where(ProviderHealth.upstream_model_id==candidate.upstream.id)) or ProviderHealth(upstream_model_id=candidate.upstream.id)
     breaker=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==candidate.upstream.id)) or CircuitBreaker(upstream_model_id=candidate.upstream.id)
     if success:
-        row.success_count=(row.success_count or 0)+1;row.last_success_at=datetime.utcnow();row.avg_latency_ms=latency_ms if row.avg_latency_ms is None else (row.avg_latency_ms*0.8+latency_ms*0.2)
+        row.success_count=(row.success_count or 0)+1;row.last_success_at=utc_now();row.avg_latency_ms=latency_ms if row.avg_latency_ms is None else (row.avg_latency_ms*0.8+latency_ms*0.2)
         breaker.state="closed";breaker.opened_at=None;breaker.half_open_at=None;breaker.consecutive_failures=0
     else:
-        row.failure_count=(row.failure_count or 0)+1;row.last_failure_at=datetime.utcnow();row.last_failure_reason=error
+        row.failure_count=(row.failure_count or 0)+1;row.last_failure_at=utc_now();row.last_failure_reason=error
         if trip_breaker:
             breaker.consecutive_failures=(breaker.consecutive_failures or 0)+1
             if breaker.state=="half_open" or breaker.consecutive_failures>=(breaker.failure_threshold or 3):
-                breaker.state="open";breaker.opened_at=datetime.utcnow();breaker.half_open_at=None
+                breaker.state="open";breaker.opened_at=utc_now();breaker.half_open_at=None
         else:
             # Authentication, unsupported-model and protocol/configuration
             # failures prove the endpoint is reachable. They are deterministic
@@ -675,7 +717,7 @@ def _apply_exceeded_budget_actions(rows:list[Budget],candidates:list[RouteCandid
 
 
 async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|None=None)->tuple[dict[str,Any],CanonicalResponse]:
-    request_id=f"req_{uuid.uuid4().hex}";started=datetime.utcnow();clock=time.perf_counter();selected:RouteCandidate|None=None;explanation=[];auxiliary={};unified=None;first_token_latency_ms:float|None=None
+    request_id=f"req_{uuid.uuid4().hex}";started=utc_now();clock=time.perf_counter();selected:RouteCandidate|None=None;explanation=[];auxiliary={};unified=None;first_token_latency_ms:float|None=None
     token_row=db.get(ApiToken,api_token_id) if api_token_id else None;token_prefix_snapshot=token_row.token_prefix if token_row else None
     try:
         unified,candidates,explanation=route_candidates(db,request)
@@ -705,9 +747,9 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
         accumulate_budget_spend(db,estimated_cost=cost,api_token_id=api_token_id,provider_id=selected.provider.id,upstream_model_id=selected.upstream.id,unified_model=request.unified_model,unified_model_id=unified.id)
         remember_session_candidate(unified,request,selected.candidate.id)
         latency_ms=(time.perf_counter()-clock)*1000
-        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=datetime.utcnow(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,combo_strategy=unified.combo_strategy,candidate_summary_json=explanation,auxiliary_summary_json=auxiliary,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,success=True,latency_ms=latency_ms,first_token_latency_ms=first_token_latency_ms))
+        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,combo_strategy=unified.combo_strategy,candidate_summary_json=explanation,auxiliary_summary_json=auxiliary,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,success=True,latency_ms=latency_ms,first_token_latency_ms=first_token_latency_ms))
         db.add(UsageHistory(request_id=request_id,api_token_id=api_token_id,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,unified_model=request.unified_model,inbound_protocol=request.inbound_protocol,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost));db.commit()
         return {"request_id":request_id,"selected":selected,"auxiliary":auxiliary,"explanation":explanation},response
     except ProtocolError as exc:
         failure_candidates=explanation or (exc.details.get("candidates") if isinstance(exc.details,dict) else None)
-        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=datetime.utcnow(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id if selected else None,upstream_model_id=selected.upstream.id if selected else None,combo_strategy=unified.combo_strategy if unified else None,candidate_summary_json=failure_candidates or None,auxiliary_summary_json=auxiliary or None,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,success=False,error_type=exc.error_type,error_message=str(exc),failure_stage=exc.stage,latency_ms=(time.perf_counter()-clock)*1000));db.commit();raise
+        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id if selected else None,upstream_model_id=selected.upstream.id if selected else None,combo_strategy=unified.combo_strategy if unified else None,candidate_summary_json=failure_candidates or None,auxiliary_summary_json=auxiliary or None,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,success=False,error_type=exc.error_type,error_message=str(exc),failure_stage=exc.stage,latency_ms=(time.perf_counter()-clock)*1000));db.commit();raise

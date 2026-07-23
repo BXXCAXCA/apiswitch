@@ -10,12 +10,13 @@ import tempfile
 import uuid
 import zipfile
 from contextlib import closing
-from datetime import datetime
 from pathlib import Path
 from pathlib import PurePosixPath
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+from apiswitch.db.base import utc_now
 
 MAGIC=b"APISWITCH-BACKUP-2\n"
 
@@ -87,7 +88,7 @@ def create_archive(data_dir: Path, password: str, destination: Path) -> dict[str
                     row=connection.execute("select generation from schema_metadata order by generation desc limit 1").fetchone();schema_generation=row[0] if row else None
             except sqlite3.Error:pass
         with zipfile.ZipFile(raw,"w",zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json",json.dumps({"version":2,"created_at":datetime.utcnow().isoformat(),"schema_generation":schema_generation,"files":manifest}))
+            archive.writestr("manifest.json",json.dumps({"version":2,"created_at":utc_now().isoformat(),"schema_generation":schema_generation,"files":manifest}))
             for file in snapshot.rglob("*"):
                 if file.is_file():archive.write(file,file.relative_to(snapshot))
         salt=os.urandom(16);nonce=os.urandom(12);cipher=AESGCM(_key(password,salt)).encrypt(nonce,raw.read_bytes(),None)
@@ -154,7 +155,7 @@ def restore_archive(data_dir: Path, password: str, archive_path: Path) -> None:
 
         previous_db=rollback/"apiswitch.db"
         if previous_db.exists():
-            backup=data_dir/"backups"/f"pre-restore-{datetime.utcnow().strftime('%Y%m%dT%H%M%S%fZ')}.db"
+            backup=data_dir/"backups"/f"pre-restore-{utc_now().strftime('%Y%m%dT%H%M%S%fZ')}.db"
             backup.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(previous_db,backup)
     finally:
         shutil.rmtree(staging,ignore_errors=True)

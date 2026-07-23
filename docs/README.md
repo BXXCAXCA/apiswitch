@@ -13,6 +13,7 @@
 7. [开发计划与验收](07-development-and-acceptance.md)：全量交付顺序、质量门槛和完成定义。
 8. [API 契约](08-api-contracts.md)：目标管理 API、网关 API 和结构化错误。
 9. [全流程开发任务提示词](FULL_DEVELOPMENT_PROMPT.md)：在新 Codex 任务中直接使用的完整指令。
+10. [ChatGPT 开发交接文档](APISwitch_ChatGPT_Development_Handoff.md)：在 ChatGPT Chat 模式中继续开发时使用的上下文快照、验证证据和可复制提示词。
 
 ## 决策优先级
 

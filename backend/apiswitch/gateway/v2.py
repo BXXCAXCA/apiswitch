@@ -7,8 +7,8 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, WebSocket
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -123,7 +123,13 @@ def parse_ingress(protocol: str, payload: dict[str, Any], model_override: str | 
     return request
 
 
-def render_egress(request: CanonicalRequest, upstream: CanonicalResponse, request_id: str) -> dict[str, Any]:
+def render_egress(request: CanonicalRequest, upstream: CanonicalResponse, request_id: str) -> dict[str, Any] | Response:
+    if upstream.binary is not None:
+        return Response(
+            content=upstream.binary,
+            media_type=upstream.media_type or "application/octet-stream",
+            headers={"x-apiswitch-request-id": request_id, "x-apiswitch-model": request.unified_model},
+        )
     if request.inbound_protocol == "anthropic_messages": return to_anthropic_response(request,upstream,request_id)
     if request.inbound_protocol == "gemini_v1beta": return to_gemini_response(request,upstream,request_id)
     if request.request_type in {"embeddings","moderations","rerank","search","images","audio","video","music"}:
@@ -255,9 +261,63 @@ async def gemini(model:str,payload:dict[str,Any],db:Session=Depends(get_db),toke
 async def gemini_stream(model:str,payload:dict[str,Any],db:Session=Depends(get_db),token:ApiToken=Depends(require_gateway_token)):
     return await _execute("gemini_v1beta",payload,db,token,model,stream_override=True)
 
-for _path,_protocol in [("/v1/embeddings","embeddings"),("/v1/images/generations","images"),("/v1/images/edits","images"),("/v1/images/variations","images"),("/v1/audio/speech","audio"),("/v1/audio/transcriptions","audio"),("/v1/moderations","moderations"),("/v1/rerank","rerank"),("/v1/search","search")]:
-    async def terminal(payload:dict[str,Any],db:Session=Depends(get_db),token:ApiToken=Depends(require_gateway_token),_protocol:str=_protocol): return await _execute(_protocol,payload,db,token)
-    router.add_api_route(_path,terminal,methods=["POST"])
+async def _terminal_payload(request: Request, operation: str) -> dict[str, Any]:
+    """Accept the native JSON or multipart shape used by the public endpoint."""
+    content_type = request.headers.get("content-type", "").lower()
+    if not content_type.startswith("multipart/form-data"):
+        try:
+            payload = await request.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise HTTPException(
+                400,
+                detail=structured_error("validation_error", "请求正文必须是有效 JSON 或 multipart/form-data", "protocol_ingress"),
+            ) from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(400, detail=structured_error("validation_error", "请求正文必须是对象", "protocol_ingress"))
+        return {**payload, "_apiswitch_operation": operation}
+
+    form = await request.form()
+    payload: dict[str, Any] = {"_apiswitch_operation": operation}
+    multipart: list[dict[str, Any]] = []
+    for key, value in form.multi_items():
+        if hasattr(value, "read") and hasattr(value, "filename"):
+            content = await value.read()
+            multipart.append({
+                "field": key,
+                "filename": value.filename or key,
+                "content_type": value.content_type or "application/octet-stream",
+                "content": content,
+            })
+        elif key in payload:
+            existing = payload[key]
+            payload[key] = [*existing, str(value)] if isinstance(existing, list) else [existing, str(value)]
+        else:
+            payload[key] = str(value)
+    payload["_apiswitch_multipart"] = multipart
+    return payload
+
+
+for _path, _protocol, _operation in [
+    ("/v1/embeddings", "embeddings", "embeddings"),
+    ("/v1/images/generations", "images", "images_generations"),
+    ("/v1/images/edits", "images", "images_edits"),
+    ("/v1/images/variations", "images", "images_variations"),
+    ("/v1/audio/speech", "audio", "audio_speech"),
+    ("/v1/audio/transcriptions", "audio", "audio_transcriptions"),
+    ("/v1/moderations", "moderations", "moderations"),
+    ("/v1/rerank", "rerank", "rerank"),
+    ("/v1/search", "search", "search"),
+]:
+    async def terminal(
+        request: Request,
+        db: Session = Depends(get_db),
+        token: ApiToken = Depends(require_gateway_token),
+        _protocol: str = _protocol,
+        _operation: str = _operation,
+    ):
+        return await _execute(_protocol, await _terminal_payload(request, _operation), db, token)
+
+    router.add_api_route(_path, terminal, methods=["POST"])
 
 @router.post("/v1/files")
 async def create_file(file: UploadFile = File(...), purpose: str = "assistants", db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):
@@ -275,10 +335,45 @@ async def create_file(file: UploadFile = File(...), purpose: str = "assistants",
     return {"id": file_id, "object": "file", "filename": row.filename, "purpose": purpose, "bytes": len(content), "status": row.status}
 
 @router.get("/v1/files/{file_id}")
-async def get_file(file_id: str, db: Session = Depends(get_db), _: ApiToken = Depends(require_gateway_token)):
+async def get_file(file_id: str, db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):
     row = db.get(StoredFile, file_id)
-    if not row: raise HTTPException(404, detail=structured_error("validation_error", "文件不存在", "file_lookup"))
+    if not row or row.api_token_id != token.id: raise HTTPException(404, detail=structured_error("validation_error", "文件不存在", "file_lookup"))
     return {"id": row.id, "object": "file", "filename": row.filename, "purpose": row.purpose, "bytes": row.byte_size, "status": row.status}
+
+
+@router.get("/v1/files")
+async def list_files(db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):
+    rows = list(db.scalars(select(StoredFile).where(StoredFile.api_token_id == token.id).order_by(StoredFile.created_at.desc())).all())
+    return {"object": "list", "data": [{"id": row.id, "object": "file", "filename": row.filename, "purpose": row.purpose, "bytes": row.byte_size, "status": row.status} for row in rows]}
+
+
+@router.get("/v1/files/{file_id}/content")
+async def get_file_content(file_id: str, db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):
+    row = db.get(StoredFile, file_id)
+    if not row or row.api_token_id != token.id: raise HTTPException(404, detail=structured_error("validation_error", "文件不存在", "file_lookup"))
+    from pathlib import Path
+    path = Path(row.storage_path)
+    if not path.is_file(): raise HTTPException(404, detail=structured_error("validation_error", "文件内容不存在", "file_lookup"))
+    return FileResponse(path, media_type=row.mime_type or "application/octet-stream", filename=row.filename)
+
+
+@router.delete("/v1/files/{file_id}")
+async def delete_file(file_id: str, db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):
+    row = db.get(StoredFile, file_id)
+    if not row or row.api_token_id != token.id: raise HTTPException(404, detail=structured_error("validation_error", "文件不存在", "file_lookup"))
+    referenced = db.scalar(select(BatchJob.id).where(
+        (BatchJob.input_file_id == file_id)
+        | (BatchJob.output_file_id == file_id)
+        | (BatchJob.error_file_id == file_id)
+    ))
+    if referenced:
+        raise HTTPException(409, detail=structured_error("resource_in_use", "文件正被批处理任务引用，不能删除", "file_delete", details={"batch_id": referenced}))
+    from pathlib import Path
+    path = Path(row.storage_path)
+    db.delete(row)
+    db.commit()
+    path.unlink(missing_ok=True)
+    return {"id": file_id, "object": "file", "deleted": True}
 
 @router.post("/v1/batches")
 async def create_batch(payload: dict[str, Any], db: Session = Depends(get_db), token: ApiToken = Depends(require_gateway_token)):

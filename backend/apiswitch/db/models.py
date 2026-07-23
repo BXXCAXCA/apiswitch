@@ -13,19 +13,19 @@ from typing import Any
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from apiswitch.db.base import Base
+from apiswitch.db.base import Base, utc_now
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class SchemaMetadata(Base):
     __tablename__ = "schema_metadata"
     generation: Mapped[int] = mapped_column(Integer, primary_key=True)
     app_version: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     reset_from_backup: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 
 
@@ -109,7 +109,7 @@ class AuxiliarySettings(Base):
     __tablename__ = "auxiliary_settings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     mode: Mapped[str] = mapped_column(String(32), default="global_pool")
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class AuxiliaryModel(Base, TimestampMixin):
@@ -164,7 +164,7 @@ class RequestLog(Base):
     __tablename__ = "request_logs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     inbound_protocol: Mapped[str] = mapped_column(String(64))
     unified_model: Mapped[str] = mapped_column(String(128))
@@ -222,7 +222,7 @@ class UsageHistory(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     estimated_cost: Mapped[float] = mapped_column(Float, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class QuotaSnapshot(Base):
@@ -232,7 +232,7 @@ class QuotaSnapshot(Base):
     remaining_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
     remaining_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     remaining_credit: Mapped[float | None] = mapped_column(Float, nullable=True)
-    captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class Budget(Base, TimestampMixin):
@@ -310,7 +310,7 @@ class SystemSetting(Base):
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value_json: Mapped[Any] = mapped_column(JSON, nullable=True)
     encrypted_value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class WebDAVProfile(Base, TimestampMixin):
@@ -335,4 +335,4 @@ class WebDAVSyncLog(Base):
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     summary_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)

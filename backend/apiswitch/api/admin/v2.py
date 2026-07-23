@@ -5,15 +5,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apiswitch.api.deps import get_db
 from apiswitch.catalog.templates import get_template, list_templates
+from apiswitch.db.base import utc_now
 from apiswitch.db.models import AgentConfig, ApiToken, ApiTokenUnifiedModel, AuxiliaryModel, AuxiliarySettings, AuxiliaryWorkflow, Budget, CircuitBreaker, ProviderHealth, ProviderInstance, QuotaSnapshot, RequestLog, SchemaMetadata, SystemSetting, UnifiedModel, UnifiedModelCandidate, UpstreamModel, UsageHistory
 from apiswitch.routing.engine import plan_auxiliary, protocol_matrix, route_candidates, structured_error
-from apiswitch.routing.capabilities import ALL_CAPABILITIES, infer_model_capabilities, infer_model_characteristics, normalize_capabilities, normalize_capability_map, normalize_workflow_steps
+from apiswitch.routing.capabilities import ALL_CAPABILITIES, infer_model_characteristics, normalize_capabilities, normalize_capability_map, normalize_workflow_steps
 from apiswitch.security.crypto import SecretCryptoError, secret_crypto
 from apiswitch.security.tokens import generate_api_token, hash_api_token, token_prefix
 from apiswitch.security.outbound import OutboundURLRejected,validate_outbound_url
@@ -156,7 +157,7 @@ def dashboard_summary(db: Session = Depends(get_db)) -> dict[str, Any]:
         .order_by(RequestLog.started_at.desc())
         .limit(5)
     ).all()
-    since=datetime.utcnow()-timedelta(hours=24)
+    since=utc_now()-timedelta(hours=24)
     provider_instances=db.scalar(select(func.count(ProviderInstance.id))) or 0
     available_upstream_models=db.scalar(select(func.count(UpstreamModel.id)).join(ProviderInstance,UpstreamModel.provider_instance_id==ProviderInstance.id).where(UpstreamModel.enabled.is_(True),ProviderInstance.enabled.is_(True),UpstreamModel.remote_status!="missing")) or 0
     unified_models=db.scalar(select(func.count(UnifiedModel.id)).where(UnifiedModel.enabled.is_(True))) or 0
@@ -289,8 +290,8 @@ async def test_provider_instance(instance_id: int, db: Session = Depends(get_db)
     from apiswitch.routing.executor import discover_models
     try:models=await discover_models(row)
     except ProtocolError as exc:
-        row.last_tested_at=datetime.utcnow();row.last_test_error=str(exc);db.commit();raise _error(exc.error_type,str(exc),exc.stage,exc.details) from exc
-    row.last_tested_at=datetime.utcnow();row.last_test_error=None
+        row.last_tested_at=utc_now();row.last_test_error=str(exc);db.commit();raise _error(exc.error_type,str(exc),exc.stage,exc.details) from exc
+    row.last_tested_at=utc_now();row.last_test_error=None
     if not row.base_url.startswith("mock://"):row.verification_status="connection_verified"
     db.commit();return {"ok":True,"mode":"mock" if row.base_url.startswith("mock://") else "remote","model_count":len(models),"message":"供应商连接成功"}
 
@@ -326,7 +327,7 @@ def _write_model(db: Session, instance_id: int, item: dict[str, Any], existing: 
             value=item[key]
             if key in {"input_capabilities_json","output_capabilities_json"}:value=_valid_capabilities(value,field=key)
             setattr(row, key, value)
-    row.display_name = str(item.get("display_name") or row.display_name or model_id); row.remote_status = item.get("remote_status", "available"); row.remote_metadata_json = item.get("remote_metadata", row.remote_metadata_json); row.last_synced_at = datetime.utcnow()
+    row.display_name = str(item.get("display_name") or row.display_name or model_id); row.remote_status = item.get("remote_status", "available"); row.remote_metadata_json = item.get("remote_metadata", row.remote_metadata_json); row.last_synced_at = utc_now()
     if existing is None: db.add(row)
     return row
 
@@ -352,11 +353,11 @@ async def probe_upstream_model(model_id: int, db: Session = Depends(get_db)) -> 
         result = await probe_model(provider, row)
     except ProtocolError as exc:
         row.remote_status = "probe_failed"
-        row.last_synced_at = datetime.utcnow()
+        row.last_synced_at = utc_now()
         db.commit()
         raise _error(exc.error_type, str(exc), "model_probe", exc.details) from exc
     row.remote_status = "available"
-    row.last_synced_at = datetime.utcnow()
+    row.last_synced_at = utc_now()
     db.commit()
     return {**result, "model": _model_out(row, db)}
 
@@ -878,10 +879,9 @@ def update_startup(payload:dict[str,Any]=Body(...))->dict[str,Any]:
 @router.post("/database/backup")
 def database_backup(payload:dict[str,Any]=Body(default={})) -> dict[str,Any]:
     from pathlib import Path
-    from datetime import datetime
     from apiswitch.desktop import _runtime_dir
     from apiswitch.backup.archive import BackupError,create_archive
-    root=_runtime_dir(); destination=Path(payload.get("destination") or root/"backups"/f"backup-{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.apsbak")
+    root=_runtime_dir(); destination=Path(payload.get("destination") or root/"backups"/f"backup-{utc_now().strftime('%Y%m%dT%H%M%SZ')}.apsbak")
     try:return create_archive(root,str(payload.get("backup_password", "")),destination)
     except BackupError as exc:raise _error("webdav_backup_invalid",str(exc),"backup") from exc
 

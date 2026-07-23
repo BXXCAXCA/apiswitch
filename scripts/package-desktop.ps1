@@ -33,7 +33,7 @@ try {
     }
     $arguments = @("--noconfirm", "--onefile", "--windowed", "--name", "APISwitch", "--distpath", $stageDist, "--paths", $backend, "--collect-submodules", "apiswitch", "--hidden-import", "pystray._win32", "--collect-submodules", "PIL", "--exclude-module", "IPython", "--add-data", "$frontend\dist;frontend\dist")
     if ($Clean) { $arguments += "--clean" }
-    $arguments += "$backend\apiswitch\desktop.py"
+    $arguments += "$backend\apiswitch\desktop_entry.py"
     & $pyinstaller @arguments
     if ($LASTEXITCODE -ne 0) { throw "Desktop packaging failed." }
     $stagedExe = Join-Path $stageDist "APISwitch.exe"
