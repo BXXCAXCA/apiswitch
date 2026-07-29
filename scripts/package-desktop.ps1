@@ -10,7 +10,9 @@ $stageDist = Join-Path $root "build\desktop-dist"
 $destinationExe = Join-Path $root "dist\APISwitch.exe"
 if (-not (Test-Path -LiteralPath $pyinstaller)) { $pyinstaller = (Get-Command pyinstaller -ErrorAction Stop).Source }
 function Get-ViteEnvironment {
-    $output = & cmd.exe /d /c "set VITE_" 2>$null
+    # `set PREFIX` returns exit code 1 when no matching variables exist.
+    # That is a valid clean-build state, so normalize it to an empty result.
+    $output = & cmd.exe /d /c "set VITE_ 2>nul & exit /b 0"
     foreach ($line in $output) {
         $separator = $line.IndexOf('=')
         if ($separator -gt 0) {
