@@ -11,6 +11,7 @@ import BudgetsView from '../src/views/BudgetsView.vue'
 import LogsView from '../src/views/LogsView.vue'
 import AgentsV2View from '../src/views/AgentsV2View.vue'
 import SystemSettingsV2View from '../src/views/SystemSettingsV2View.vue'
+import RouterStatusView from '../src/views/RouterStatusView.vue'
 import CapabilityCheckboxGroup from '../src/components/CapabilityCheckboxGroup.vue'
 import { inputCapabilityOptions } from '../src/modelCapabilities'
 import { getJson, patchJson, postJson } from '../src/api/client'
@@ -248,6 +249,18 @@ describe('generation two product pages', () => {
     expect(strategy.props('disabled')).toBe(true)
     expect(wrapper.text()).toContain('留空表示继承上游模型')
     wrapper.unmount()
+  })
+
+  it('syncs the dry-run model with the selected unified model', async () => {
+    const getMock = vi.mocked(getJson)
+    getMock.mockImplementation(async (url: string) => url === '/api/admin/router/status'
+      ? { models: [{ id: 7, name: 'selected-model', candidates: [] }], matrix: {}, health: [], circuit_breakers: [], quotas: [] } as any
+      : [] as any)
+    const wrapper = mountWithMessage(RouterStatusView)
+    await flushPromises()
+    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toContain('"model": "selected-model"')
+    wrapper.unmount()
+    getMock.mockImplementation(async () => [] as any)
   })
 
   it('shows complete upstream model names in the unified candidate selector', async () => {

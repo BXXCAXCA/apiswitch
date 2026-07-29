@@ -35,6 +35,30 @@ def test_configured_auxiliary_workflow_executes_before_main_candidate(client: Te
     assert log["auxiliary_summary"]["steps"][0]["upstream_model_id"] == auxiliary["id"]
 
 
+def test_vision_to_text_replaces_images_before_text_only_main_model(client: TestClient, monkeypatch):
+    auxiliary, unified, headers = _base_route(client)
+    client.post("/api/admin/auxiliary/models", json={"upstream_model_id": auxiliary["id"], "capabilities": ["vision"], "priority": 1})
+    client.post("/api/admin/auxiliary/workflows", json={"workflow_type": "vision_to_text", "input_capability": "vision", "output_capability": "text", "ordered_steps": [{"input": "vision", "output": "text"}]})
+
+    captured: list[dict] = []
+    from apiswitch.routing import executor
+    original = executor._call_http
+
+    async def capture(candidate, request):
+        captured.append({"model": candidate.upstream.model_id, "messages": request.messages})
+        return await original(candidate, request)
+
+    monkeypatch.setattr(executor, "_call_http", capture)
+    response = client.post("/v1/chat/completions", headers=headers, json=_vision_request(unified["name"]))
+
+    assert response.status_code == 200, response.text
+    main_request = next(item for item in captured if item["model"] == "main-text")
+    content = main_request["messages"][0]["content"]
+    assert isinstance(content, str)
+    assert "图片描述：" in content
+    assert "image_url" not in content
+
+
 def test_auxiliary_workflow_without_configured_model_fails_before_main_call(client: TestClient):
     _, unified, headers = _base_route(client)
     client.post("/api/admin/auxiliary/workflows", json={"workflow_type": "vision_to_text", "input_capability": "vision", "output_capability": "text", "ordered_steps": [{"input": "vision", "output": "text"}]})

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import tomlkit
 import yaml
-from apiswitch.desktop import _refresh_agents_for_port_change, _select_port
+from apiswitch.desktop import DesktopTray, _refresh_agents_for_port_change, _select_port
 
 
 def test_select_port_uses_preferred_port_when_available():
@@ -25,6 +25,14 @@ def test_select_port_avoids_an_existing_windows_listener():
 
         assert selected_port != occupied_port
         assert 0 < selected_port <= 65535
+
+
+def test_minimizing_keeps_native_taskbar_restore_available():
+    tray = object.__new__(DesktopTray)
+    hide_calls = []
+    tray.window = type("Window", (), {"hide": lambda self: hide_calls.append(True)})()
+    tray.on_minimized()
+    assert hide_calls == []
 
 
 def test_port_change_backs_up_and_refreshes_enabled_claude_config(client, tmp_path, monkeypatch):

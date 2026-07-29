@@ -658,8 +658,42 @@ async def _run_auxiliary_steps(db:Session,request:CanonicalRequest,plan:dict[str
         if step.get("workflow_type")=="terminal_capability":terminal_response=result
         elif is_post:post_response=result
         elif result.get("text"):
-            request.messages=[*request.messages,{"role":"system","content":f"辅助工作流 {step.get('workflow_type')} 结果：\n{result['text']}"}]
+            if step.get("workflow_type") == "vision_to_text":
+                request.messages = _replace_vision_content(request.messages, str(result["text"]))
+            else:
+                request.messages=[*request.messages,{"role":"system","content":f"辅助工作流 {step.get('workflow_type')} 结果：\n{result['text']}"}]
     return request,terminal_response or post_response
+
+
+def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list[dict[str,Any]]:
+    """Replace image parts with the auxiliary description for text-only routes."""
+    replaced: list[dict[str,Any]] = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            replaced.append(message)
+            continue
+        parts: list[str] = []
+        changed = False
+        for part in content:
+            if isinstance(part, dict) and part.get("type") in {"image_url", "input_image"}:
+                changed = True
+                continue
+            if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
+                parts.append(str(part.get("text") or ""))
+            elif isinstance(part, str):
+                parts.append(part)
+        if changed:
+            text = "\n".join(item for item in parts if item.strip())
+            if text:
+                text += "\n"
+            text += f"图片描述：{description}"
+            updated = dict(message)
+            updated["content"] = text
+            replaced.append(updated)
+        else:
+            replaced.append(message)
+    return replaced
 
 
 def _health(db:Session,candidate:RouteCandidate,success:bool,latency_ms:float,error:str|None=None,trip_breaker:bool=True)->None:

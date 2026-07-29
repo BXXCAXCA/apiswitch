@@ -17,7 +17,7 @@
     </n-card>
     <n-card title="统一模型列表"><n-empty v-if="!unified.length" description="暂无统一模型"/><n-data-table v-else :columns="modelColumns" :data="unified" :pagination="{pageSize:12}"/></n-card>
     <n-card title="候选上游模型">
-      <n-alert type="info" style="margin-bottom:12px">能力覆盖只影响此候选在当前统一模型中的能力判断，不会修改上游模型。留空表示继承上游模型；仅在自动识别不准确或该供应商实例实际能力不同的时候设置。</n-alert>
+      <n-alert type="info" style="margin-bottom:12px">能力覆盖只影响此候选在当前统一模型中的能力判断，不会修改上游模型。留空表示继承上游模型；勾选后会完全替换对应方向的上游能力，未勾选的能力将视为不可用。</n-alert>
       <n-form inline>
         <n-form-item label="统一模型"><n-select v-model:value="selectedUnifiedId" :options="unifiedOptions" style="min-width:220px"/></n-form-item>
         <n-form-item label="上游模型">
@@ -28,7 +28,7 @@
         </n-form-item>
         <n-form-item label="优先级"><n-input-number v-model:value="candidateForm.priority" :min="1"/></n-form-item><n-form-item label="权重"><n-input-number v-model:value="candidateForm.weight" :min="0"/></n-form-item><n-form-item label="启用"><n-switch v-model:value="candidateForm.enabled"/></n-form-item>
       </n-form>
-      <n-grid responsive="screen" :cols="'1 m:2'" :x-gap="16"><n-form-item-gi label="覆盖输入能力（可选）"><capability-checkbox-group v-model="candidateForm.override_input" :options="inputCapabilityOptions"/></n-form-item-gi><n-form-item-gi label="覆盖输出能力（可选）"><capability-checkbox-group v-model="candidateForm.override_output" :options="outputCapabilityOptions"/></n-form-item-gi></n-grid>
+      <n-grid responsive="screen" :cols="'1 m:2'" :x-gap="16"><n-form-item-gi label="覆盖输入能力（完全替换）"><capability-checkbox-group v-model="candidateForm.override_input" :options="inputCapabilityOptions"/></n-form-item-gi><n-form-item-gi label="覆盖输出能力（完全替换）"><capability-checkbox-group v-model="candidateForm.override_output" :options="outputCapabilityOptions"/></n-form-item-gi></n-grid>
       <n-space><n-button type="primary" @click="saveCandidate">{{editingCandidateId?'保存候选':'添加候选'}}</n-button><n-button v-if="editingCandidateId" @click="resetCandidate">取消编辑</n-button></n-space>
       <n-data-table style="margin-top:12px" :columns="candidateColumns" :data="selectedModel?.candidates||[]"/>
     </n-card>

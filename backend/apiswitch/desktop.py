@@ -197,7 +197,10 @@ class DesktopTray:
         return False
 
     def on_minimized(self) -> None:
-        self.hide()
+        # Keep the native window minimized so its taskbar button remains a
+        # working restore affordance.  Only the tray's explicit "隐藏窗口"
+        # action should hide the window completely.
+        return None
 
     def copy_gateway_address(self,icon,_item)->None:
         import json
@@ -398,7 +401,6 @@ def run_desktop(*, start_hidden: bool = False) -> None:
         ipc_listener = _start_ipc_server(window)
         tray = DesktopTray(window)
         window.events.closing += tray.on_closing
-        window.events.minimized += tray.on_minimized
         tray.start()
         try:
             webview.start()

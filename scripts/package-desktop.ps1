@@ -9,14 +9,28 @@ $pyinstaller = Join-Path $backend ".venv\Scripts\pyinstaller.exe"
 $stageDist = Join-Path $root "build\desktop-dist"
 $destinationExe = Join-Path $root "dist\APISwitch.exe"
 if (-not (Test-Path -LiteralPath $pyinstaller)) { $pyinstaller = (Get-Command pyinstaller -ErrorAction Stop).Source }
-$viteEnvironment = @(Get-ChildItem Env: | Where-Object { $_.Name -like "VITE_*" } | ForEach-Object { [PSCustomObject]@{ Name = $_.Name; Value = $_.Value } })
+function Get-ViteEnvironment {
+    $output = & cmd.exe /d /c "set VITE_" 2>$null
+    foreach ($line in $output) {
+        $separator = $line.IndexOf('=')
+        if ($separator -gt 0) {
+            [PSCustomObject]@{ Name = $line.Substring(0, $separator); Value = $line.Substring($separator + 1) }
+        }
+    }
+}
+function Clear-ViteEnvironment {
+    foreach ($entry in (Get-ViteEnvironment)) {
+        [Environment]::SetEnvironmentVariable($entry.Name, $null, 'Process')
+    }
+}
+$viteEnvironment = @(Get-ViteEnvironment)
 Push-Location $frontend
 try {
-    Get-ChildItem Env: | Where-Object { $_.Name -like "VITE_*" } | ForEach-Object { Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
+    Clear-ViteEnvironment
     npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
 } finally {
-    Get-ChildItem Env: | Where-Object { $_.Name -like "VITE_*" } | ForEach-Object { Remove-Item ("Env:" + $_.Name) -ErrorAction SilentlyContinue }
+    Clear-ViteEnvironment
     foreach ($entry in $viteEnvironment) { Set-Item ("Env:" + $entry.Name) $entry.Value }
     Pop-Location
 }
