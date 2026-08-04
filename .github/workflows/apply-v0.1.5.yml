@@ -144,7 +144,7 @@ jobs:
           gh run download "$CI_RUN_ID" --name APISwitch-windows-x64-v0.1.5 --dir release
           test -f release/APISwitch-v0.1.5.exe
           test -f release/APISwitch-v0.1.5.sha256.txt
-          sha256sum --check release/APISwitch-v0.1.5.sha256.txt
+          (cd release && sha256sum --check APISwitch-v0.1.5.sha256.txt)
       - name: Publish v0.1.5 release
         run: |
           if ! gh release view v0.1.5 >/dev/null 2>&1; then
