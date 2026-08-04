@@ -2,7 +2,7 @@
 
 APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关。客户端只使用稳定的“统一模型”名称，软件在内部完成供应商实例管理、上游模型同步、协议转换、Combo 路由、辅助模型工作流、鉴权、预算、日志和 Agent 配置。
 
-> 文档与实现基线：2026-07-16。新版业务路径已经切换到“供应商实例 → 上游模型 → 统一模型/辅助模型”，不再暴露 Connection/Node 页面或接口依赖。
+> 文档与实现基线：2026-08-04。新版业务路径已经切换到“供应商实例 → 上游模型 → 统一模型/辅助模型”，不再暴露 Connection/Node 页面或接口依赖。
 
 ## 当前实现状态
 
@@ -10,7 +10,8 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 - Windows 桌面端使用 `%USERPROFILE%\.apiswitch`，支持单实例唤醒、托盘、后台启动、自启动、8080 冲突换端口和安全退出。
 - 供应商模板中的真实云服务均明确标记为“未验证”或“兼容模式”；自动化验收只使用 Mock、模拟 HTTP 上游和固定协议样例。
 - 前端十二个管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
-- GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录和产物上传。
+- GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录、产物上传和 GitHub Release 发布。
+- 当前发布版本为 [`v0.1.4`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.4)：已修复 OpenAI Responses 流式输出缺失 content/reasoning/tool part 生命周期的问题。
 - 唯一确认延期项是“辅助调用链每一步的独立 Token、成本、延迟和预算归集”；基础辅助链日志、失败阶段和总请求统计已经实现。
 
 ## 最终产品流程
@@ -46,17 +47,9 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 
 ## 文档入口
 
-- [文档索引](docs/README.md)
-- [产品需求](docs/01-product-requirements.md)
-- [界面与使用流程](docs/02-information-architecture.md)
-- [系统架构](docs/03-system-architecture.md)
-- [数据模型](docs/04-data-model.md)
-- [协议、路由与辅助模型](docs/05-protocol-routing.md)
-- [桌面运行、安全与备份](docs/06-desktop-security-backup.md)
-- [开发计划与验收](docs/07-development-and-acceptance.md)
-- [API 契约](docs/08-api-contracts.md)
-- [全流程开发任务提示词](docs/FULL_DEVELOPMENT_PROMPT.md)
-- [ChatGPT 开发交接文档](docs/APISwitch_ChatGPT_Development_Handoff.md)
+- **在 GPT 网页版继续开发**：先使用 [续开发交接包](docs/CONTINUE_IN_GPT.md)。
+- 详细设计与 API 契约：见 [文档索引](docs/README.md)。
+- 当前发布与安装包：见 [GitHub Releases](https://github.com/BXXCAXCA/apiswitch/releases)。
 
 ## 开发命令
 
@@ -70,7 +63,7 @@ pytest
 
 # 前端
 cd ..\frontend
-npm install
+npm ci
 npm run test
 npm run build
 
@@ -79,4 +72,4 @@ cd ..
 .\scripts\package-desktop.ps1 -Clean
 ```
 
-发布产物为 `dist\APISwitch.exe`。真实供应商密钥不得进入代码、测试、日志、文档或构建产物。
+发布产物为 `dist\APISwitch-v<版本号>.exe`。真实供应商密钥不得进入代码、测试、日志、文档或构建产物。
