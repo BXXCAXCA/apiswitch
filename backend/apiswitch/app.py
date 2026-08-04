@@ -13,6 +13,7 @@ from apiswitch.api.deps import require_admin_access
 from apiswitch.db.bootstrap import init_database
 from apiswitch.gateway.v2 import router as gateway_router
 from apiswitch.routing.engine import structured_error
+from apiswitch.stream_compat import SSECompatibilityMiddleware
 
 
 class DuplicateV1PrefixMiddleware:
@@ -47,6 +48,7 @@ async def lifespan(_: FastAPI):
 def create_app() -> FastAPI:
     app=FastAPI(title="APISwitch",version=__version__,lifespan=lifespan)
     app.add_middleware(DuplicateV1PrefixMiddleware)
+    app.add_middleware(SSECompatibilityMiddleware)
     @app.exception_handler(Exception)
     async def unexpected(_, exc:Exception):
         return JSONResponse(status_code=500,content=structured_error("provider_unavailable","网关内部错误","internal"))
