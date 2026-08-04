@@ -1,0 +1,156 @@
+name: Apply APISwitch v0.1.5
+
+on:
+  push:
+    branches:
+      - automation/apply-v0.1.5
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: apply-apiswitch-v0.1.5
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: 5dee31301d8183278f3b3e304b050f97b9565ba4
+  PATCH_SHA256: 703faa943f78ddee6e436ce02a320115adba05127dc8bd44dc7d0ddca2398923
+
+jobs:
+  backend:
+    name: Validate backend patch
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Assemble and apply patch to clean main
+        shell: bash
+        run: |
+          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git switch --detach origin/main
+          git apply --check "$RUNNER_TEMP/v0.1.5.patch"
+          git apply "$RUNNER_TEMP/v0.1.5.patch"
+          git diff --check
+          grep -F '__version__ = "0.1.5"' backend/apiswitch/__init__.py
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt -r requirements-dev.txt
+      - name: Run backend tests
+        run: python -m pytest backend/tests -q
+      - name: Run Ruff fatal checks
+        run: python -m ruff check backend --select F,E9
+
+  frontend:
+    name: Validate frontend patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assemble and apply patch to clean main
+        run: |
+          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git switch --detach origin/main
+          git apply --check "$RUNNER_TEMP/v0.1.5.patch"
+          git apply "$RUNNER_TEMP/v0.1.5.patch"
+          git diff --check
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm run test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Scan tracked source and documentation
+        run: python scripts/scan-sensitive.py .
+
+  publish:
+    name: Update main, build Windows release, and publish
+    needs:
+      - backend
+      - frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create clean release commit and push main
+        run: |
+          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git switch --detach origin/main
+          git apply --check "$RUNNER_TEMP/v0.1.5.patch"
+          git apply "$RUNNER_TEMP/v0.1.5.patch"
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add backend frontend docs
+          git commit -m "fix: release APISwitch v0.1.5"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git push origin HEAD:main
+          echo "FINAL_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Dispatch official CI on main
+        run: gh workflow run ci.yml --ref main
+      - name: Wait for official CI
+        run: |
+          run_id=""
+          for attempt in $(seq 1 60); do
+            run_id=$(gh run list --workflow ci.yml --branch main --event workflow_dispatch --limit 20 --json databaseId,headSha --jq ".[] | select(.headSha == \"$FINAL_SHA\") | .databaseId" | head -n 1)
+            if [ -n "$run_id" ]; then break; fi
+            sleep 10
+          done
+          test -n "$run_id"
+          echo "CI_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          gh run watch "$run_id" --exit-status
+      - name: Download Windows v0.1.5 artifact
+        run: |
+          rm -rf release
+          mkdir release
+          gh run download "$CI_RUN_ID" --name APISwitch-windows-x64-v0.1.5 --dir release
+          test -f release/APISwitch-v0.1.5.exe
+          test -f release/APISwitch-v0.1.5.sha256.txt
+          sha256sum --check release/APISwitch-v0.1.5.sha256.txt
+      - name: Publish v0.1.5 release
+        run: |
+          if ! gh release view v0.1.5 >/dev/null 2>&1; then
+            gh release create v0.1.5 --target "$FINAL_SHA" --title "APISwitch v0.1.5" --generate-notes
+          fi
+          gh release upload v0.1.5 release/APISwitch-v0.1.5.exe release/APISwitch-v0.1.5.sha256.txt --clobber
+      - name: Remove temporary automation branch
+        if: success()
+        run: git push origin --delete automation/apply-v0.1.5
