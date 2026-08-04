@@ -5,7 +5,7 @@ from pathlib import Path
 import tomlkit
 import yaml
 from apiswitch import __version__
-from apiswitch.desktop import DesktopTray, _refresh_agents_for_port_change, _select_port, _write_runtime
+from apiswitch.desktop import DesktopTray, _clear_runtime, _refresh_agents_for_port_change, _select_port, _write_runtime
 
 
 def test_runtime_file_uses_package_version(tmp_path, monkeypatch):
@@ -14,6 +14,18 @@ def test_runtime_file_uses_package_version(tmp_path, monkeypatch):
     _write_runtime(54321)
 
     assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["version"] == __version__
+
+
+def test_runtime_file_cleanup_only_removes_its_own_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr("apiswitch.desktop._runtime_dir", lambda: tmp_path)
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text('{"pid":98765}', encoding="utf-8")
+
+    _clear_runtime(expected_pid=12345)
+    assert runtime.is_file()
+
+    _clear_runtime(expected_pid=98765)
+    assert not runtime.exists()
 
 
 def test_select_port_uses_preferred_port_when_available():

@@ -268,6 +268,25 @@ def _write_runtime(port: int) -> None:
     os.replace(temporary, root / "runtime.json")
 
 
+def _clear_runtime(expected_pid: int | None = None) -> None:
+    """Remove a stale runtime marker without deleting another live instance's state."""
+    runtime = _runtime_dir() / "runtime.json"
+    if not runtime.is_file():
+        return
+    if expected_pid is not None:
+        import json
+        try:
+            recorded_pid = int(json.loads(runtime.read_text(encoding="utf-8")).get("pid"))
+        except (OSError, TypeError, ValueError):
+            return
+        if recorded_pid != expected_pid:
+            return
+    try:
+        runtime.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def _refresh_agents_for_port_change(previous_base_url: str | None, base_url: str) -> int:
     if previous_base_url == base_url:
         return 0
@@ -373,6 +392,9 @@ def run_desktop(*, start_hidden: bool = False) -> None:
         _request_existing_window()
         return
     previous_base_url = str(runtime_info().get("base_url") or "")
+    # A forced exit may leave runtime.json behind.  Once this process owns the
+    # mutex, no other desktop host can legitimately own that marker.
+    _clear_runtime()
     _, frontend = configure_desktop_environment()
     if not (frontend / "index.html").is_file():
         raise RuntimeError("Bundled frontend is missing. Build the frontend before packaging APISwitch Desktop.")
@@ -418,6 +440,7 @@ def run_desktop(*, start_hidden: bool = False) -> None:
     finally:
         server.should_exit = True
         worker.join(timeout=5)
+        _clear_runtime(os.getpid())
 
 
 if __name__ == "__main__":
