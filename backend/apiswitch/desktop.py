@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import socket
 import stat
@@ -13,6 +14,8 @@ import urllib.request
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+
+from apiswitch import __version__
 
 
 _DESKTOP_ENVIRONMENT = {
@@ -261,7 +264,7 @@ def _write_runtime(port: int) -> None:
     import json
     root = _runtime_dir()
     temporary = root / "runtime.json.tmp"
-    temporary.write_text(json.dumps({"pid": os.getpid(), "port": port, "base_url": f"http://127.0.0.1:{port}", "version": "0.1.0", "started_at": time.time(), "data_directory": str(root), "desktop": True}), encoding="utf-8")
+    temporary.write_text(json.dumps({"pid": os.getpid(), "port": port, "base_url": f"http://127.0.0.1:{port}", "version": __version__, "started_at": time.time(), "data_directory": str(root), "desktop": True}), encoding="utf-8")
     os.replace(temporary, root / "runtime.json")
 
 
@@ -275,13 +278,17 @@ def _refresh_agents_for_port_change(previous_base_url: str | None, base_url: str
         return refresh_enabled_agent_configs(db, base_url)
 
 
-def _acquire_single_instance() -> bool:
+def _acquire_single_instance(diagnostic_identity: str | None = None) -> bool:
     """Acquire a current-user Windows mutex without relying on a writable EXE directory."""
     global _instance_mutex
     if sys.platform != "win32":
         return True
     import ctypes
-    name = f"Local\\APISwitch-{os.getenv('USERNAME', 'user')}"
+    if diagnostic_identity:
+        suffix = "diagnostic-" + hashlib.sha256(diagnostic_identity.encode("utf-8")).hexdigest()[:16]
+    else:
+        suffix = os.getenv("USERNAME", "user")
+    name = f"Local\\APISwitch-{suffix}"
     handle = ctypes.windll.kernel32.CreateMutexW(None, False, name)
     if not handle:
         raise OSError("无法创建 APISwitch 单实例互斥体")

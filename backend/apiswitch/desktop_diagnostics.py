@@ -130,7 +130,7 @@ def run_smoke_test(report_path: Path) -> int:
 
 def run_instance_probe(report_path: Path, hold_seconds: float) -> int:
     """Acquire the real Windows mutex and optionally hold it for a second process."""
-    acquired = _acquire_single_instance()
+    acquired = _acquire_single_instance(os.getenv("APISWITCH_DIAGNOSTIC_INSTANCE_ID"))
     _write_report(
         report_path,
         {

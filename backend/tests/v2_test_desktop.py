@@ -4,7 +4,16 @@ from pathlib import Path
 
 import tomlkit
 import yaml
-from apiswitch.desktop import DesktopTray, _refresh_agents_for_port_change, _select_port
+from apiswitch import __version__
+from apiswitch.desktop import DesktopTray, _refresh_agents_for_port_change, _select_port, _write_runtime
+
+
+def test_runtime_file_uses_package_version(tmp_path, monkeypatch):
+    monkeypatch.setattr("apiswitch.desktop._runtime_dir", lambda: tmp_path)
+
+    _write_runtime(54321)
+
+    assert json.loads((tmp_path / "runtime.json").read_text(encoding="utf-8"))["version"] == __version__
 
 
 def test_select_port_uses_preferred_port_when_available():
