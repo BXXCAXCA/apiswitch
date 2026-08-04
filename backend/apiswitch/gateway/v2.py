@@ -138,9 +138,9 @@ def render_egress(request: CanonicalRequest, upstream: CanonicalResponse, reques
         return {"id":request_id,"object":request.request_type,"model":request.unified_model,"data":[{"mock":True,"result":upstream["text"]}]}
     if request.inbound_protocol == "openai_responses":
         output=[]
-        if upstream.reasoning_content:output.append({"id":"rs_"+request_id,"type":"reasoning","summary":[{"type":"summary_text","text":upstream.reasoning_content}]})
+        if upstream.reasoning_content:output.append({"id":"rs_"+request_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":upstream.reasoning_content}]})
         if upstream.text:output.append({"id":"msg_"+request_id,"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":upstream.text,"annotations":[]}]})
-        output.extend({"id":item.get("id") or f"call_{index}","type":"function_call","call_id":item.get("id") or f"call_{index}","name":item.get("name",""),"arguments":json.dumps(item.get("arguments") or {},ensure_ascii=False,separators=(",",":"))} for index,item in enumerate(upstream.tool_calls))
+        output.extend({"id":item.get("id") or f"call_{index}","type":"function_call","status":"completed","call_id":item.get("id") or f"call_{index}","name":item.get("name",""),"arguments":json.dumps(item.get("arguments") or {},ensure_ascii=False,separators=(",",":"))} for index,item in enumerate(upstream.tool_calls))
         return {"id":"resp_"+request_id,"object":"response","created_at":int(time.time()),"status":"completed","error":None,"incomplete_details":None,"instructions":request.instructions,"model":request.unified_model,"output":output,"output_text":upstream.text,"parallel_tool_calls":True,"tool_choice":request.tool_choice or "auto","tools":request.tools,"temperature":request.parameters.get("temperature"),"top_p":request.parameters.get("top_p"),"usage":upstream.usage or None,"metadata":{}}
     return to_openai_response(request,upstream,request_id)
 
@@ -169,23 +169,63 @@ def render_sse(request: CanonicalRequest, events: list[CanonicalEvent]) -> list[
         return output
     if request.inbound_protocol == "openai_responses":
         response_id = "resp_" + events[0].request_id
+        sequence = 0
+
+        def emit(event_type: str, **payload: Any) -> None:
+            nonlocal sequence
+            output.append(_sse({"type": event_type, "sequence_number": sequence, **payload}, event_type))
+            sequence += 1
+
+        emit(
+            "response.created",
+            response={
+                "id": response_id,
+                "object": "response",
+                "created_at": int(time.time()),
+                "status": "in_progress",
+                "model": request.unified_model,
+                "output": [],
+            },
+        )
+        emit(
+            "response.in_progress",
+            response={"id": response_id, "object": "response", "status": "in_progress", "model": request.unified_model, "output": []},
+        )
+        output_index = 0
         for event in events:
             if event.event_type == "start":
-                event_type="response.created"
-                data={"type":event_type,"response":{"id":response_id,"object":"response","status":"in_progress","model":request.unified_model,"output":[]}}
+                continue
+            if event.event_type == "reasoning_delta":
+                item_id = "rs_" + event.request_id
+                summary = event.delta or ""
+                item = {"id": item_id, "type": "reasoning", "status": "in_progress", "summary": []}
+                part = {"type": "summary_text", "text": ""}
+                emit("response.output_item.added", output_index=output_index, item=item)
+                emit("response.reasoning_summary_part.added", item_id=item_id, output_index=output_index, summary_index=0, part=part)
+                emit("response.reasoning_summary_text.delta", item_id=item_id, output_index=output_index, summary_index=0, delta=summary)
+                emit("response.reasoning_summary_text.done", item_id=item_id, output_index=output_index, summary_index=0, text=summary)
+                emit("response.reasoning_summary_part.done", item_id=item_id, output_index=output_index, summary_index=0, part={"type": "summary_text", "text": summary})
+                emit("response.output_item.done", output_index=output_index, item={"id": item_id, "type": "reasoning", "status": "completed", "summary": [{"type": "summary_text", "text": summary}]})
+                output_index += 1
             elif event.event_type == "content_delta":
-                event_type="response.output_text.delta"
-                data={"type":event_type,"item_id":"msg_"+event.request_id,"output_index":0,"content_index":0,"delta":event.delta or ""}
-            elif event.event_type=="reasoning_delta":
-                event_type="response.reasoning_summary_text.delta"
-                data={"type":event_type,"item_id":"rs_"+event.request_id,"output_index":0,"summary_index":0,"delta":event.delta or ""}
+                item_id = "msg_" + event.request_id
+                text = event.delta or ""
+                emit("response.output_item.added", output_index=output_index, item={"id": item_id, "type": "message", "status": "in_progress", "role": "assistant", "content": []})
+                emit("response.content_part.added", item_id=item_id, output_index=output_index, content_index=0, part={"type": "output_text", "text": "", "annotations": []})
+                emit("response.output_text.delta", item_id=item_id, output_index=output_index, content_index=0, delta=text)
+                emit("response.output_text.done", item_id=item_id, output_index=output_index, content_index=0, text=text)
+                emit("response.content_part.done", item_id=item_id, output_index=output_index, content_index=0, part={"type": "output_text", "text": text, "annotations": []})
+                emit("response.output_item.done", output_index=output_index, item={"id": item_id, "type": "message", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": text, "annotations": []}]})
+                output_index += 1
             elif event.event_type=="tool_delta":
-                event_type="response.function_call_arguments.delta";item=event.data or {}
-                data={"type":event_type,"item_id":item.get("id") or f"call_{event.index}","output_index":event.index,"delta":json.dumps(item.get("arguments") or {},ensure_ascii=False,separators=(",",":"))}
-            else:
-                event_type="response.completed"
-                data={"type":event_type,"response":event.response}
-            output.append(_sse(data,event_type))
+                item=event.data or {};item_id=item.get("id") or f"call_{event.index}";arguments=json.dumps(item.get("arguments") or {},ensure_ascii=False,separators=(",",":"))
+                emit("response.output_item.added", output_index=output_index, item={"id": item_id, "type": "function_call", "status": "in_progress", "call_id": item_id, "name": item.get("name", ""), "arguments": ""})
+                emit("response.function_call_arguments.delta", item_id=item_id, output_index=output_index, delta=arguments)
+                emit("response.function_call_arguments.done", item_id=item_id, output_index=output_index, arguments=arguments)
+                emit("response.output_item.done", output_index=output_index, item={"id": item_id, "type": "function_call", "status": "completed", "call_id": item_id, "name": item.get("name", ""), "arguments": arguments})
+                output_index += 1
+            elif event.event_type == "completed":
+                emit("response.completed", response=event.response)
         return output
     if request.inbound_protocol == "anthropic_messages":
         request_id=events[0].request_id

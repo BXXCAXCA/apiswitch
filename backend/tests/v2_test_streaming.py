@@ -1,4 +1,8 @@
+import json
 from uuid import uuid4
+
+from apiswitch.gateway.v2 import render_egress, render_sse
+from apiswitch.protocols.canonical import CanonicalRequest, CanonicalResponse, response_events
 
 
 def _streaming_gateway(client):
@@ -32,7 +36,12 @@ def test_each_chat_protocol_uses_its_native_sse_vocabulary(client):
     responses = client.post("/v1/responses", headers=headers, json={"model": "stream-model", "input": "hello", "stream": True})
     assert responses.status_code == 200
     assert "event: response.created" in responses.text
+    assert "event: response.output_item.added" in responses.text
+    assert "event: response.content_part.added" in responses.text
     assert "event: response.output_text.delta" in responses.text
+    assert "event: response.output_text.done" in responses.text
+    assert "event: response.content_part.done" in responses.text
+    assert "event: response.output_item.done" in responses.text
     assert "event: response.completed" in responses.text
 
     anthropic = client.post("/v1/messages", headers=headers, json={"model": "stream-model", "max_tokens": 20, "messages": [{"role": "user", "content": "hello"}], "stream": True})
@@ -52,6 +61,44 @@ def test_each_chat_protocol_uses_its_native_sse_vocabulary(client):
     assert logs and all(row["first_token_latency_ms"] is not None for row in logs)
     summary = client.get("/api/admin/dashboard/summary").json()
     assert summary["first_token_latency_ms"] > 0
+
+
+def test_responses_stream_establishes_reasoning_text_and_tool_parts_before_deltas():
+    request = CanonicalRequest("chat", "openai_responses", "stream-model", stream=True)
+    upstream = CanonicalResponse(
+        reasoning_content="think",
+        text="answer",
+        tool_calls=[{"id": "call_weather", "name": "weather", "arguments": {"city": "Shanghai"}}],
+    )
+    result = render_egress(request, upstream, "req_stream")
+    chunks = render_sse(request, response_events(upstream, "req_stream", result))
+    records = [json.loads(chunk.split("data: ", 1)[1]) for chunk in chunks]
+    event_types = [record["type"] for record in records]
+
+    assert event_types == [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.reasoning_summary_part.added",
+        "response.reasoning_summary_text.delta",
+        "response.reasoning_summary_text.done",
+        "response.reasoning_summary_part.done",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.output_item.added",
+        "response.function_call_arguments.delta",
+        "response.function_call_arguments.done",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    assert records[2]["item"]["id"] == records[3]["item_id"] == "rs_req_stream"
+    assert records[8]["item"]["id"] == records[9]["item_id"] == "msg_req_stream"
+    assert records[14]["item"]["id"] == records[15]["item_id"] == "call_weather"
 
 
 def test_responses_input_rejects_unconvertible_items(client):
