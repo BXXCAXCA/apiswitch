@@ -41,7 +41,17 @@ jobs:
       - name: Assemble and apply patch to clean main
         shell: bash
         run: |
-          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          python - "$RUNNER_TEMP/v0.1.5.patch" <<'PY'
+          import base64
+          import sys
+          from pathlib import Path
+
+          output = bytearray()
+          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
+              encoded = ''.join(part.read_text(encoding='utf-8').split())
+              output.extend(base64.b64decode(encoded, validate=True))
+          Path(sys.argv[1]).write_bytes(output)
+          PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$BASE_SHA"
@@ -75,7 +85,17 @@ jobs:
           python-version: '3.11'
       - name: Assemble and apply patch to clean main
         run: |
-          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          python - "$RUNNER_TEMP/v0.1.5.patch" <<'PY'
+          import base64
+          import sys
+          from pathlib import Path
+
+          output = bytearray()
+          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
+              encoded = ''.join(part.read_text(encoding='utf-8').split())
+              output.extend(base64.b64decode(encoded, validate=True))
+          Path(sys.argv[1]).write_bytes(output)
+          PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$BASE_SHA"
@@ -111,7 +131,17 @@ jobs:
           fetch-depth: 0
       - name: Create clean release commit and push main
         run: |
-          cat .automation/v0.1.5/patch.b64.part* | base64 --decode > "$RUNNER_TEMP/v0.1.5.patch"
+          python - "$RUNNER_TEMP/v0.1.5.patch" <<'PY'
+          import base64
+          import sys
+          from pathlib import Path
+
+          output = bytearray()
+          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
+              encoded = ''.join(part.read_text(encoding='utf-8').split())
+              output.extend(base64.b64decode(encoded, validate=True))
+          Path(sys.argv[1]).write_bytes(output)
+          PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$BASE_SHA"
