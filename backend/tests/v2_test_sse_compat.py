@@ -10,7 +10,7 @@ from apiswitch.stream_compat import SSECompatibilityMiddleware
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 
 
-def _run(app, path: str = "/v1/responses") -> list[dict[str, Any]]:
+def _run(app, path: str) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
 
     async def receive() -> dict[str, Any]:
@@ -35,6 +35,168 @@ def _body(messages: list[dict[str, Any]]) -> bytes:
         for message in messages
         if message.get("type") == "http.response.body"
     )
+
+
+def _sse_payloads(body: bytes) -> list[dict[str, Any]]:
+    payloads = []
+    for line in body.splitlines():
+        if line.startswith(b"data: ") and line != b"data: [DONE]":
+            payloads.append(json.loads(line.removeprefix(b"data: ")))
+    return payloads
+
+
+def test_chat_missing_finish_is_synthesized_before_done() -> None:
+    content = (
+        b'data: {"id":"chatcmpl_req","object":"chat.completion.chunk",'
+        b'"created":1786000000,"model":"client-model","choices":['
+        b'{"index":0,"delta":{"content":"ok"},"finish_reason":null}]}\r\n\r\n'
+        b"data: [DONE]\r\n\r\n"
+    )
+
+    async def app(_scope, _receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        cut = len(content) - 17
+        await send(
+            {
+                "type": "http.response.body",
+                "body": content[:cut],
+                "more_body": True,
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": content[cut:],
+                "more_body": False,
+            }
+        )
+
+    messages = _run(app, "/v1/chat/completions")
+    body = _body(messages)
+    payloads = _sse_payloads(body)
+    terminal = payloads[-1]
+    headers = dict(messages[0]["headers"])
+
+    assert terminal["id"] == "chatcmpl_req"
+    assert terminal["model"] == "client-model"
+    assert terminal["choices"] == [
+        {"index": 0, "delta": {}, "finish_reason": "stop"}
+    ]
+    assert body.endswith(b"data: [DONE]\n\n")
+    assert body.count(b"data: [DONE]\n\n") == 1
+    assert headers[b"x-apiswitch-protocol"] == b"openai_chat"
+    assert headers[b"x-apiswitch-sse-compat"] == b"chat-terminal-v1"
+
+
+def test_chat_explicit_length_is_preserved_and_normalized() -> None:
+    terminal = {
+        "id": "chatcmpl_length",
+        "object": "wrong",
+        "created": 1_786_000_000,
+        "model": "client-model",
+        "choices": [
+            {
+                "index": "bad",
+                "delta": {"content": 42},
+                "finish_reason": "length",
+                "provider_private": "ignored",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": "7",
+            "completion_tokens": 3,
+            "total_tokens": 5,
+        },
+    }
+
+    async def app(_scope, _receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": (
+                    f"data: {json.dumps(terminal)}\n\n"
+                    "data: [DONE]\n\n"
+                ).encode(),
+                "more_body": False,
+            }
+        )
+
+    body = _body(_run(app, "/v1/chat/completions"))
+    payload = _sse_payloads(body)[0]
+    assert payload["object"] == "chat.completion.chunk"
+    assert payload["choices"] == [
+        {"index": 0, "delta": {}, "finish_reason": "length"}
+    ]
+    assert payload["usage"] == {
+        "prompt_tokens": 7,
+        "completion_tokens": 3,
+        "total_tokens": 10,
+    }
+    assert body.count(b'"finish_reason":"stop"') == 0
+
+
+def test_chat_eof_after_valid_finish_appends_done_only() -> None:
+    terminal = (
+        b'data: {"id":"chatcmpl_req","model":"client-model","choices":['
+        b'{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'
+    )
+
+    async def app(_scope, _receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": terminal,
+                "more_body": False,
+            }
+        )
+
+    body = _body(_run(app, "/v1/chat/completions"))
+    assert body.count(b'"finish_reason":"stop"') == 1
+    assert body.count(b"data: [DONE]\n\n") == 1
+
+
+def test_chat_error_stream_does_not_synthesize_success() -> None:
+    error = b'data: {"error":{"message":"failed"}}\n\ndata: [DONE]\n\n'
+
+    async def app(_scope, _receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": error,
+                "more_body": False,
+            }
+        )
+
+    body = _body(_run(app, "/v1/chat/completions"))
+    assert b'"finish_reason":"stop"' not in body
+    assert body.count(b"data: [DONE]\n\n") == 1
 
 
 def test_responses_terminal_frame_is_compact_and_done_is_appended() -> None:
@@ -98,13 +260,14 @@ def test_responses_terminal_frame_is_compact_and_done_is_appended() -> None:
             }
         )
 
-    messages = _run(app)
+    messages = _run(app, "/v1/responses")
     headers = dict(messages[0]["headers"])
     body = _body(messages)
 
     assert headers[b"cache-control"] == b"no-cache, no-transform"
     assert headers[b"x-accel-buffering"] == b"no"
-    assert headers[b"x-apiswitch-sse-compat"] == b"responses-terminal-v1"
+    assert headers[b"x-apiswitch-protocol"] == b"openai_responses"
+    assert headers[b"x-apiswitch-sse-compat"] == b"responses-terminal-v2"
     assert headers[b"x-apiswitch-version"]
     assert b"response.output_text.delta" in body
     assert b"system prompt" not in body
@@ -138,7 +301,31 @@ def test_responses_terminal_frame_is_compact_and_done_is_appended() -> None:
     }
 
 
-def test_existing_done_sentinel_is_not_duplicated() -> None:
+def test_non_target_stream_is_untouched() -> None:
+    original = b"data: original\n\n"
+
+    async def app(_scope, _receive, send: Send) -> None:
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": original,
+                "more_body": False,
+            }
+        )
+
+    messages = _run(app, "/v1/messages")
+    assert _body(messages) == original
+    assert b"x-apiswitch-sse-compat" not in dict(messages[0]["headers"])
+
+
+def test_responses_existing_done_sentinel_is_not_duplicated() -> None:
     terminal = {
         "type": "response.completed",
         "response": {
@@ -172,28 +359,6 @@ def test_existing_done_sentinel_is_not_duplicated() -> None:
             }
         )
 
-    assert _body(_run(app)).count(b"data: [DONE]\n\n") == 1
-
-
-def test_non_responses_stream_is_untouched() -> None:
-    original = b"data: original\n\n"
-
-    async def app(_scope, _receive, send: Send) -> None:
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [(b"content-type", b"text/event-stream")],
-            }
-        )
-        await send(
-            {
-                "type": "http.response.body",
-                "body": original,
-                "more_body": False,
-            }
-        )
-
-    messages = _run(app, "/v1/chat/completions")
-    assert _body(messages) == original
-    assert b"x-apiswitch-sse-compat" not in dict(messages[0]["headers"])
+    assert _body(_run(app, "/v1/responses")).count(
+        b"data: [DONE]\n\n"
+    ) == 1
