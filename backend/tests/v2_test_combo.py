@@ -82,6 +82,27 @@ def test_non_combo_mode_ignores_stored_combo_strategy(client,monkeypatch):
         assert engine.route_candidates(db,request)[1][0].upstream.id==upstreams[0]["id"]
 
 
+def test_unified_capability_declaration_is_a_contract_not_a_per_request_filter(client):
+    provider=client.post("/api/admin/provider-instances",json={"name":f"declared-{uuid4().hex}","template_key":"openai","base_url":"mock://declared"}).json()
+    upstream=client.post(f"/api/admin/provider-instances/{provider['id']}/upstream-models",json={"model_id":"tool-model","input_capabilities_json":["text"],"output_capabilities_json":["text","tools"]}).json()
+    unified=client.post("/api/admin/unified-models",json={
+        "name":f"declared-{uuid4().hex}",
+        "enabled_protocols":["openai_chat"],
+        "required_capabilities":{"input":["text","files","tool_results","long_context"],"output":["text","tools"]},
+    }).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":upstream["id"]})
+    with SessionLocal() as db:
+        plain=CanonicalRequest("chat","openai_chat",unified["name"],messages=[{"role":"user","content":"hello"}])
+        assert engine.route_candidates(db,plain)[1][0].upstream.id==upstream["id"]
+        tool_turn=CanonicalRequest("chat","openai_chat",unified["name"],messages=[{"role":"tool","content":"ok"}],required_input=["text","tool_results"],required_output=["tools"])
+        assert engine.route_candidates(db,tool_turn)[1][0].upstream.id==upstream["id"]
+        vision=CanonicalRequest("chat","openai_chat",unified["name"],required_input=["text","vision"])
+        try:engine.route_candidates(db,vision)
+        except ProtocolError as exc:
+            assert exc.error_type=="capability_not_supported" and exc.details["missing_input"]==["vision"]
+        else:raise AssertionError("capabilities outside the unified contract must be rejected")
+
+
 def test_unified_model_context_latency_and_cost_constraints_filter_candidates(client):
     unified_data,upstreams,_=_combo_fixture(client)
     request=CanonicalRequest("chat","openai_chat",unified_data["name"],messages=[{"role":"user","content":"x"}],parameters={"max_tokens":1})

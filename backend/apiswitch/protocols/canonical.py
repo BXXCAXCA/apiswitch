@@ -68,11 +68,13 @@ def from_openai_chat(payload: dict[str, Any]) -> CanonicalRequest:
     text_size=0
     for message in messages:
         content = message.get("content", "") if isinstance(message, dict) else ""
+        if isinstance(message, dict) and message.get("role") == "tool": needs.append("tool_results")
         if isinstance(content,str):text_size+=len(content)
         parts = content if isinstance(content, list) else []
         if any(isinstance(p, dict) and p.get("type") in {"image_url", "input_image"} for p in parts): needs.append("vision")
         if any(isinstance(p, dict) and p.get("type") in {"input_audio"} for p in parts): needs.append("audio")
         if any(isinstance(p,dict) and p.get("type") in {"input_file","file"} for p in parts):needs.append("files")
+        if any(isinstance(p,dict) and p.get("type") in {"tool_result","function_call_output"} for p in parts):needs.append("tool_results")
         text_size+=sum(len(str(part.get("text",""))) for part in parts if isinstance(part,dict))
     if text_size>32_000:needs.append("long_context")
     output=["tools"] if payload.get("tools") else (["json"] if payload.get("response_format") else ["text"])
@@ -93,6 +95,7 @@ def from_openai_responses(payload: dict[str, Any]) -> CanonicalRequest:
                 raise ProtocolError("protocol_conversion_unsupported", "Responses input 项无法可靠转换为消息", "protocol_conversion")
             item_type = item.get("type", "message")
             if item_type == "function_call_output":
+                needs.append("tool_results")
                 messages.append({"role":"tool","tool_call_id":item.get("call_id"),"content":item.get("output","")})
                 continue
             if item_type == "function_call":
@@ -134,6 +137,7 @@ def from_anthropic(payload: dict[str, Any]) -> CanonicalRequest:
         parts=message.get("content",[]) if isinstance(message,dict) else []
         if isinstance(parts,list) and any(isinstance(part,dict) and part.get("type")=="image" for part in parts):needs.append("vision")
         if isinstance(parts,list) and any(isinstance(part,dict) and part.get("type")=="document" for part in parts):needs.append("files")
+        if isinstance(parts,list) and any(isinstance(part,dict) and part.get("type")=="tool_result" for part in parts):needs.append("tool_results")
     parameters={key:payload[key] for key in ("max_tokens","temperature","top_p","top_k") if payload.get(key) is not None}
     if payload.get("stop_sequences") is not None:parameters["stop"]=payload["stop_sequences"]
     thinking=payload.get("thinking")
@@ -151,6 +155,7 @@ def from_gemini(model: str, payload: dict[str, Any]) -> CanonicalRequest:
         if mime.startswith("image/"):needs.append("vision")
         if mime.startswith("audio/"):needs.append("audio")
         if part.get("fileData") or part.get("file_data"):needs.append("files")
+        if part.get("functionResponse") or part.get("function_response"):needs.append("tool_results")
     generation=payload.get("generationConfig") or payload.get("generation_config") or {}
     if not isinstance(generation,dict):
         raise ProtocolError("protocol_conversion_unsupported","generationConfig 必须是对象","protocol_conversion")

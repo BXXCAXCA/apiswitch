@@ -548,6 +548,42 @@ def test_one_gemini_call_falls_back_from_http_400_to_wrapped_openai_response(cli
     assert len(logs)==1 and logs[0]["success"] is True and logs[0]["upstream_model_id"]==second["id"]
     failed_attempt=next(item for item in logs[0]["candidate_summary"] if item.get("reasons")==["运行时失败：upstream_http_error"])
     assert failed_attempt["details"]["status_code"]==400
+    assert failed_attempt["details"]["upstream_error_message"]=="simulated bad request"
+
+
+def test_cross_protocol_tool_results_keep_valid_openai_tool_call_links(client:TestClient,monkeypatch):
+    captured=[]
+    def upstream(request:httpx.Request)->httpx.Response:
+        payload=json.loads(request.content);captured.append(payload)
+        if len(captured)==1:
+            assistant=payload["messages"][0];result=payload["messages"][1]
+            assert assistant["role"]=="assistant" and assistant["tool_calls"][0]["function"]["name"]=="lookup"
+            assert result["role"]=="tool" and result["tool_call_id"]==assistant["tool_calls"][0]["id"]
+        else:
+            assert all(message["role"]!="tool" for message in payload["messages"])
+            assert "Tool result (call_previous):" in payload["messages"][0]["content"]
+        return httpx.Response(200,json={"choices":[{"message":{"content":"ok"}}],"usage":{}})
+
+    monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(upstream))
+    provider_id=_provider(client,"https://tool-links.invalid/v1")
+    model=client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models",json={"model_id":"tool-model","input_capabilities_json":["text"],"output_capabilities_json":["text","tools"]}).json()
+    unified=client.post("/api/admin/unified-models",json={"name":f"tool-links-{uuid4().hex}","enabled_protocols":["gemini_v1beta","openai_responses"],"required_capabilities":{"input":["text","tool_results"],"output":["text","tools"]}}).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":model["id"]})
+    headers=_token(client)
+    gemini=client.post(f"/v1beta/models/{unified['name']}:generateContent",headers=headers,json={
+        "contents":[
+            {"role":"model","parts":[{"functionCall":{"name":"lookup","args":{"q":"x"}}}]},
+            {"role":"user","parts":[{"functionResponse":{"name":"lookup","response":{"value":"y"}}}]},
+        ],
+        "tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"object","properties":{"q":{"type":"string"}}}}]}],
+    })
+    assert gemini.status_code==200,gemini.text
+    responses=client.post("/v1/responses",headers=headers,json={
+        "model":unified["name"],
+        "input":[{"type":"function_call_output","call_id":"call_previous","output":"done"}],
+        "tools":[{"type":"function","name":"lookup","parameters":{"type":"object","properties":{}}}],
+    })
+    assert responses.status_code==200,responses.text
 
 
 def test_circuit_breaker_opens_skips_then_half_open_probe_closes(client: TestClient, monkeypatch):

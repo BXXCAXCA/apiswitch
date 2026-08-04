@@ -45,7 +45,11 @@ def structured_error(error_type: str, message: str, stage: str, request_id: str 
 
 def _caps(upstream: UpstreamModel, candidate: UnifiedModelCandidate) -> set[str]:
     overrides = candidate.capability_overrides_json or {}
-    return set(overrides.get("input", upstream.input_capabilities_json or [])) | set(overrides.get("output", upstream.output_capabilities_json or []))
+    capabilities = set(overrides.get("input", upstream.input_capabilities_json or [])) | set(overrides.get("output", upstream.output_capabilities_json or []))
+    # A model that can emit tool calls must also be able to consume the
+    # corresponding tool results on the next turn.
+    if "tools" in capabilities: capabilities.add("tool_results")
+    return capabilities
 
 
 def _provider_protocol_supports(provider: ProviderInstance, request: CanonicalRequest) -> bool:
@@ -75,10 +79,19 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
     enabled_protocols = set(unified.enabled_protocols_json or [])
     if request.inbound_protocol not in enabled_protocols:
         raise ProtocolError("protocol_not_enabled", "统一模型未开启该入口协议", "protocol_check", {"protocol": request.inbound_protocol})
-    declared=unified.required_capabilities_json or {}
     expected = set(request.required_input + request.required_output)
+    declared=unified.required_capabilities_json or {}
     if isinstance(declared,dict):
-        expected.update(declared.get("input",[]));expected.update(declared.get("output",[]))
+        declared_input=set(declared.get("input",[]));declared_output=set(declared.get("output",[]))
+        missing_input=set(request.required_input)-declared_input if declared_input else set()
+        missing_output=set(request.required_output)-declared_output if declared_output else set()
+        if missing_input or missing_output:
+            raise ProtocolError(
+                "capability_not_supported",
+                "请求超出统一模型声明的能力范围",
+                "capability_check",
+                {"missing_input":sorted(missing_input),"missing_output":sorted(missing_output)},
+            )
     workflows = _applicable_workflows(db, unified)
     assisted_capabilities = {capability for workflow in workflows for capability in (workflow.input_capability, workflow.output_capability)}
     rows = db.execute(select(UnifiedModelCandidate, UpstreamModel, ProviderInstance).join(UpstreamModel, UnifiedModelCandidate.upstream_model_id == UpstreamModel.id).join(ProviderInstance, UpstreamModel.provider_instance_id == ProviderInstance.id).where(UnifiedModelCandidate.unified_model_id == unified.id)).all()

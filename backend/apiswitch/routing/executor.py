@@ -129,7 +129,7 @@ def _canonical_message_parts(request:CanonicalRequest,message:dict[str,Any])->li
 
 def _messages_for_openai(request:CanonicalRequest)->list[dict[str,Any]]:
     if request.inbound_protocol=="openai_chat":return list(request.messages)
-    output=[]
+    output=[];emitted_call_ids:set[str]=set();pending_call_ids:dict[str,list[str]]={}
     for message in request.messages:
         if not isinstance(message,dict):raise ProtocolError("protocol_conversion_unsupported","消息必须是对象","protocol_conversion")
         role="assistant" if message.get("role") in {"assistant","model"} else ("system" if message.get("role")=="system" else "user")
@@ -146,10 +146,45 @@ def _messages_for_openai(request:CanonicalRequest)->list[dict[str,Any]]:
                     else:content_value.append({"type":"input_audio","input_audio":part.get("audio")})
             item={"role":role,"content":content_value}
             if reasoning:item["reasoning_content"]="\n".join(reasoning)
-            if calls:item["tool_calls"]=[{"id":call.get("id") or f"call_{len(output)}_{index}","type":"function","function":{"name":call.get("name"),"arguments":__import__("json").dumps(call.get("arguments") or {},ensure_ascii=False,separators=(",",":"))}} for index,call in enumerate(calls)]
+            if calls:
+                tool_calls=[]
+                for index,call in enumerate(calls):
+                    call_id=str(call.get("id") or f"call_{len(output)}_{index}");name=str(call.get("name") or "")
+                    emitted_call_ids.add(call_id);pending_call_ids.setdefault(name,[]).append(call_id)
+                    tool_calls.append({"id":call_id,"type":"function","function":{"name":name,"arguments":__import__("json").dumps(call.get("arguments") or {},ensure_ascii=False,separators=(",",":"))}})
+                item["tool_calls"]=tool_calls
             output.append(item)
-        for result in results:output.append({"role":"tool","tool_call_id":result.get("tool_call_id") or result.get("name"),"content":result.get("content","") if isinstance(result.get("content"),str) else __import__("json").dumps(result.get("content") or {},ensure_ascii=False)})
+        for result in results:
+            content=result.get("content","") if isinstance(result.get("content"),str) else __import__("json").dumps(result.get("content") or {},ensure_ascii=False)
+            raw_id=str(result.get("tool_call_id") or "");name=str(result.get("name") or "")
+            call_id=raw_id if raw_id in emitted_call_ids else ""
+            if not call_id and name and pending_call_ids.get(name):call_id=pending_call_ids[name].pop(0)
+            if not call_id and raw_id and pending_call_ids.get(raw_id):call_id=pending_call_ids[raw_id].pop(0)
+            if call_id:output.append({"role":"tool","tool_call_id":call_id,"content":content})
+            else:
+                # Responses API may send only function_call_output together
+                # with previous_response_id.  Chat Completions has no server-
+                # side conversation state, so an orphan tool message would be
+                # rejected with HTTP 400. Preserve the result as user text.
+                label=name or raw_id or "unknown"
+                output.append({"role":"user","content":f"Tool result ({label}): {content}"})
     return output
+
+
+def _upstream_http_error_details(response:httpx.Response,provider_id:int)->dict[str,Any]:
+    details:dict[str,Any]={"provider_instance_id":provider_id,"status_code":response.status_code}
+    try:payload=response.json()
+    except ValueError:return details
+    error=payload.get("error") if isinstance(payload,dict) else None
+    if isinstance(error,dict):
+        message=error.get("message") or error.get("detail")
+        code=error.get("code") or error.get("type")
+    else:
+        message=error if isinstance(error,str) else (payload.get("message") if isinstance(payload,dict) else None)
+        code=payload.get("code") if isinstance(payload,dict) else None
+    if message:details["upstream_error_message"]=str(message)[:500]
+    if code:details["upstream_error_code"]=str(code)[:128]
+    return details
 
 
 def _messages_for_anthropic(request:CanonicalRequest)->list[dict[str,Any]]:
@@ -562,7 +597,7 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
         except httpx.TimeoutException as exc:raise ProtocolError("provider_timeout","上游请求超时","upstream_call",{"provider_instance_id":provider.id}) from exc
         except httpx.HTTPError as exc:raise ProtocolError("provider_unavailable","无法连接上游供应商","upstream_call",{"provider_instance_id":provider.id}) from exc
         if response.status_code>=400:
-            raise ProtocolError("upstream_http_error",f"上游返回 HTTP {response.status_code}","upstream_call",{"provider_instance_id":provider.id,"status_code":response.status_code})
+            raise ProtocolError("upstream_http_error",f"上游返回 HTTP {response.status_code}","upstream_call",_upstream_http_error_details(response,provider.id))
         response_content_type=response.headers.get("content-type","").lower()
         is_audio_speech=request.parameters.get("_apiswitch_operation")=="audio_speech"
         if is_audio_speech and "json" not in response_content_type:
