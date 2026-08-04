@@ -20,6 +20,7 @@ from apiswitch.db.models import AgentConfig, UnifiedModel, UnifiedModelCandidate
 MODEL_FIELDS = ("main_model_id", "opus_model_id", "sonnet_model_id", "haiku_model_id")
 _SCHEMA_URL = "https://json.schemastore.org/claude-code-settings.json"
 AGENT_SPECS: dict[str, dict[str, str]] = {
+    "claude-code": {"label": "Claude Code", "path": ".claude/settings.json", "protocol": "anthropic_messages", "language": "json"},
     "codex": {"label": "Codex", "path": ".codex/config.toml", "protocol": "openai_responses", "language": "toml"},
     "opencode": {"label": "OpenCode", "path": ".config/opencode/opencode.json", "protocol": "openai_chat", "language": "json"},
     "openclaw": {"label": "龙虾（OpenClaw）", "path": ".openclaw/openclaw.json", "protocol": "openai_chat", "language": "json"},
@@ -327,7 +328,15 @@ def restore_agent_config(config_path: str, backup_path: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def claude_content(db: Session, model_ids: dict[str, int | None], base_url: str) -> dict[str, Any]:
+def claude_content(
+    db: Session,
+    model_ids: dict[str, int | None],
+    base_url: str,
+    *,
+    existing_text: str = "",
+    api_token: str | None = None,
+) -> dict[str, Any]:
+    """Merge APISwitch routing values into a Claude Code settings document."""
     ids = [value for value in model_ids.values() if value]
     names: dict[int, str] = {}
     for model_id in ids:
@@ -338,17 +347,54 @@ def claude_content(db: Session, model_ids: dict[str, int | None], base_url: str)
     main = names.get(model_ids.get("main_model_id"))
     if not main:
         raise ValueError("Claude Code 主模型必须选择已启用的统一模型")
-    env = {"ANTHROPIC_BASE_URL": base_url, "ANTHROPIC_MODEL": main, "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"}
-    optional = {"ANTHROPIC_DEFAULT_OPUS_MODEL": names.get(model_ids.get("opus_model_id")), "ANTHROPIC_DEFAULT_SONNET_MODEL": names.get(model_ids.get("sonnet_model_id")), "ANTHROPIC_DEFAULT_HAIKU_MODEL": names.get(model_ids.get("haiku_model_id"))}
-    env.update({key: value for key, value in optional.items() if value})
-    return {"$schema": _SCHEMA_URL, "model": main, "env": env}
+
+    document = _load_json5(existing_text)
+    document.setdefault("$schema", _SCHEMA_URL)
+    document["model"] = main
+    env_value = document.get("env")
+    if env_value is not None and not isinstance(env_value, dict):
+        raise ValueError("Claude Code 现有 env 配置必须是对象")
+    env = dict(env_value or {})
+    env.update({
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_MODEL": main,
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+    })
+    optional = {
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": names.get(model_ids.get("opus_model_id")),
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": names.get(model_ids.get("sonnet_model_id")),
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": names.get(model_ids.get("haiku_model_id")),
+    }
+    for key, value in optional.items():
+        if value:
+            env[key] = value
+        else:
+            env.pop(key, None)
+    token = api_token.strip() if isinstance(api_token, str) and api_token.strip() else None
+    if token:
+        env["ANTHROPIC_AUTH_TOKEN"] = token
+    document["env"] = env
+    return document
 
 
-def write_claude_config(db: Session, row: AgentConfig, base_url: str) -> Path | None:
+def write_claude_config(
+    db: Session,
+    row: AgentConfig,
+    base_url: str,
+    api_token: str | None = None,
+) -> Path | None:
     if not row.config_path:
         raise ValueError("Claude Code 配置路径未设置")
-    content = claude_content(db, {field: getattr(row, field) for field in MODEL_FIELDS}, base_url)
-    backup = atomic_write_config(Path(row.config_path), content)
+    target = validate_user_config_path(Path(row.config_path))
+    existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+    content = claude_content(
+        db,
+        {field: getattr(row, field) for field in MODEL_FIELDS},
+        base_url,
+        existing_text=existing,
+        api_token=api_token,
+    )
+    backup = atomic_write_config(target, content)
     row.last_written_base_url = base_url
     row.last_backup_path = str(backup) if backup else None
     db.add(row)
@@ -356,10 +402,9 @@ def write_claude_config(db: Session, row: AgentConfig, base_url: str) -> Path | 
 
 
 def refresh_enabled_agent_configs(db: Session, base_url: str) -> int:
-    supported = (*AGENT_SPECS.keys(), "claude-code")
     rows = db.scalars(
         select(AgentConfig).where(
-            AgentConfig.enabled.is_(True), AgentConfig.agent_type.in_(supported)
+            AgentConfig.enabled.is_(True), AgentConfig.agent_type.in_(tuple(AGENT_SPECS))
         )
     ).all()
     changed = [row for row in rows if row.last_written_base_url != base_url]

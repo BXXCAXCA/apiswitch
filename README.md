@@ -2,7 +2,7 @@
 
 APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关。客户端只使用稳定的“统一模型”名称，软件在内部完成供应商实例管理、上游模型同步、协议转换、Combo 路由、辅助模型工作流、鉴权、预算、日志和 Agent 配置。
 
-> 文档与实现基线：2026-08-04。新版业务路径已经切换到“供应商实例 → 上游模型 → 统一模型/辅助模型”，不再暴露 Connection/Node 页面或接口依赖。
+> 文档与实现基线：2026-08-05。新版业务路径已经切换到“供应商实例 → 上游模型 → 统一模型/辅助模型”，不再暴露 Connection/Node 页面或接口依赖。
 
 ## 当前实现状态
 
@@ -11,7 +11,7 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 - 供应商模板中的真实云服务均明确标记为“未验证”或“兼容模式”；自动化验收只使用 Mock、模拟 HTTP 上游和固定协议样例。
 - 前端十二个管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
 - GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录、产物上传和 GitHub Release 发布。
-- 当前发布版本为 [`v0.1.4`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.4)：已修复 OpenAI Responses 流式输出缺失 content/reasoning/tool part 生命周期的问题。
+- 当前发布版本为 [`v0.1.6`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.6)：严格规范化 OpenAI Responses 完成事件的 usage，避免兼容客户端把正常结束误判为 `finish reason "other"`；Claude Code 与 Langcli 配置改为安全合并写入，调用日志的筛选、分页和顶部横向滚动控制已重排。
 - 唯一确认延期项是“辅助调用链每一步的独立 Token、成本、延迟和预算归集”；基础辅助链日志、失败阶段和总请求统计已经实现。
 
 ## 最终产品流程

@@ -212,28 +212,33 @@ def _usage_details(value: Any) -> dict[str, Any]:
 
 
 def to_openai_responses_usage(usage: dict[str, Any] | None) -> dict[str, Any]:
-    """Translate Chat-style usage into the OpenAI Responses usage schema.
+    """Translate Chat-style usage into the strict OpenAI Responses usage schema.
 
-    OpenAI-compatible upstreams commonly return ``prompt_tokens`` and
-    ``completion_tokens``. Responses clients require ``input_tokens`` and
-    ``output_tokens`` on the final response event; returning Chat keys or null
-    makes strict clients treat an otherwise completed stream as finish reason
-    ``other``.
+    Responses clients only recognize the terminal ``response.completed`` event
+    when the nested usage object matches their schema. Normalize both Chat and
+    Responses token keys and deliberately omit provider-specific detail fields
+    so strict clients do not leave the finish reason at their default ``other``.
     """
     source = usage if isinstance(usage, dict) else {}
     input_tokens = _usage_number(source.get("input_tokens", source.get("prompt_tokens")))
     output_tokens = _usage_number(source.get("output_tokens", source.get("completion_tokens")))
     total_tokens = _usage_number(source.get("total_tokens"))
     total_tokens = max(total_tokens, input_tokens + output_tokens)
-    input_details = _usage_details(source.get("input_tokens_details") or source.get("prompt_tokens_details"))
-    output_details = _usage_details(source.get("output_tokens_details") or source.get("completion_tokens_details"))
-    input_details["cached_tokens"] = _usage_number(input_details.get("cached_tokens"))
-    output_details["reasoning_tokens"] = _usage_number(output_details.get("reasoning_tokens"))
+    raw_input_details = _usage_details(
+        source.get("input_tokens_details") or source.get("prompt_tokens_details")
+    )
+    raw_output_details = _usage_details(
+        source.get("output_tokens_details") or source.get("completion_tokens_details")
+    )
     return {
         "input_tokens": input_tokens,
-        "input_tokens_details": input_details,
+        "input_tokens_details": {
+            "cached_tokens": _usage_number(raw_input_details.get("cached_tokens"))
+        },
         "output_tokens": output_tokens,
-        "output_tokens_details": output_details,
+        "output_tokens_details": {
+            "reasoning_tokens": _usage_number(raw_output_details.get("reasoning_tokens"))
+        },
         "total_tokens": total_tokens,
     }
 
