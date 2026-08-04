@@ -25,6 +25,7 @@ AGENT_SPECS: dict[str, dict[str, str]] = {
     "openclaw": {"label": "龙虾（OpenClaw）", "path": ".openclaw/openclaw.json", "protocol": "openai_chat", "language": "json"},
     "hermes": {"label": "Hermes Agent", "path": ".hermes/config.yaml", "protocol": "openai_chat", "language": "yaml"},
     "gemini-cli": {"label": "Gemini CLI", "path": ".gemini/.env", "protocol": "gemini_v1beta", "language": "shell"},
+    "langcli": {"label": "Langcli", "path": ".langcli/settings.json", "protocol": "openai_chat", "language": "json"},
 }
 
 
@@ -201,6 +202,40 @@ def agent_content(
         }
         return yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
 
+    if agent_type == "langcli":
+        document = _load_json5(existing_text)
+        env_value = document.get("env")
+        if env_value is not None and not isinstance(env_value, dict):
+            raise ValueError("Langcli 现有 env 配置必须是对象")
+        if token:
+            env = dict(env_value or {})
+            env["APISWITCH_API_KEY"] = token
+            document["env"] = env
+
+        providers_value = document.get("modelProviders")
+        if providers_value is not None and not isinstance(providers_value, dict):
+            raise ValueError("Langcli 现有 modelProviders 配置必须是对象")
+        providers = dict(providers_value or {})
+        openai_value = providers.get("openai")
+        if openai_value is not None and not isinstance(openai_value, list):
+            raise ValueError("Langcli modelProviders.openai 必须是数组")
+        models = [
+            item
+            for item in (openai_value or [])
+            if not isinstance(item, dict) or item.get("id") != model.name
+        ]
+        models.append({
+            "id": model.name,
+            "name": model.name,
+            "description": "APISwitch unified model",
+            "envKey": "APISWITCH_API_KEY",
+            "baseUrl": _gateway_url(base_url, openai=True),
+        })
+        providers["openai"] = models
+        document["modelProviders"] = providers
+        document["model"] = f"custom:{model.name}"
+        return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+
     return _merge_env(existing_text, {
         "GEMINI_API_KEY": token,
         "GOOGLE_GEMINI_BASE_URL": _gateway_url(base_url),
@@ -216,7 +251,7 @@ def _redact(content: str, api_token: str | None) -> str:
         redacted,
     )
     return re.sub(
-        r'("apiKey"\s*:\s*)"(?:[^"\\]|\\.)*"',
+        r'("(?:apiKey|APISWITCH_API_KEY|ANTHROPIC_AUTH_TOKEN)"\s*:\s*)"(?:[^"\\]|\\.)*"',
         r'\1"<已隐藏>"',
         redacted,
     )
@@ -294,7 +329,10 @@ def restore_agent_config(config_path: str, backup_path: str) -> None:
 
 def claude_content(db: Session, model_ids: dict[str, int | None], base_url: str) -> dict[str, Any]:
     ids = [value for value in model_ids.values() if value]
-    names = {row.id: row.name for row in db.scalars(select(UnifiedModel).where(UnifiedModel.id.in_(ids), UnifiedModel.enabled.is_(True))).all()} if ids else {}
+    names: dict[int, str] = {}
+    for model_id in ids:
+        row = _model(db, model_id, "anthropic_messages")
+        names[row.id] = row.name
     if any(value not in names for value in ids):
         raise ValueError("Agent 引用了不存在的统一模型")
     main = names.get(model_ids.get("main_model_id"))

@@ -101,6 +101,47 @@ def test_responses_stream_establishes_reasoning_text_and_tool_parts_before_delta
     assert records[14]["item"]["id"] == records[15]["item_id"] == "call_weather"
 
 
+def test_responses_completed_event_normalizes_chat_usage_for_strict_clients():
+    request = CanonicalRequest("chat", "openai_responses", "stream-model", stream=True)
+    upstream = CanonicalResponse(
+        text="answer",
+        usage={
+            "prompt_tokens": 7,
+            "prompt_tokens_details": {"cached_tokens": 2},
+            "completion_tokens": 5,
+            "completion_tokens_details": {"reasoning_tokens": 3},
+            "total_tokens": 12,
+        },
+    )
+    result = render_egress(request, upstream, "req_usage")
+    assert isinstance(result, dict)
+    assert result["usage"] == {
+        "input_tokens": 7,
+        "input_tokens_details": {"cached_tokens": 2},
+        "output_tokens": 5,
+        "output_tokens_details": {"reasoning_tokens": 3},
+        "total_tokens": 12,
+    }
+    records = [
+        json.loads(chunk.split("data: ", 1)[1])
+        for chunk in render_sse(request, response_events(upstream, "req_usage", result))
+    ]
+    created = next(record for record in records if record["type"] == "response.created")
+    in_progress = next(record for record in records if record["type"] == "response.in_progress")
+    assert in_progress["response"]["created_at"] == created["response"]["created_at"]
+    completed = next(record for record in records if record["type"] == "response.completed")
+    assert completed["response"]["status"] == "completed"
+    assert completed["response"]["usage"] == result["usage"]
+
+
+def test_responses_completed_event_supplies_zero_usage_when_upstream_omits_it():
+    request = CanonicalRequest("chat", "openai_responses", "stream-model", stream=True)
+    result = render_egress(request, CanonicalResponse(text="answer"), "req_empty_usage")
+    assert isinstance(result, dict)
+    assert result["usage"]["input_tokens"] == result["usage"]["output_tokens"] == 0
+    assert result["usage"]["total_tokens"] == 0
+
+
 def test_responses_input_rejects_unconvertible_items(client):
     headers = _streaming_gateway(client)
     response = client.post("/v1/responses", headers=headers, json={"model": "stream-model", "input": [{"type": "computer_screenshot"}]})

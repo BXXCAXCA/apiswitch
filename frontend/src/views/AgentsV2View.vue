@@ -2,10 +2,10 @@
   <n-space vertical size="large">
     <n-h1>Agent 配置</n-h1>
     <n-alert type="info">
-      已实现 Codex、OpenCode、龙虾（OpenClaw）、Hermes Agent 和 Gemini CLI。写入前会自动备份并合并现有配置；客户端 Token 只写入目标文件，不保存到 APISwitch 数据库。
+      已实现 Claude Code、Codex、OpenCode、龙虾（OpenClaw）、Hermes Agent、Gemini CLI 和 Langcli。写入前会自动备份并合并现有配置；客户端 Token 只写入目标文件，不保存到 APISwitch 数据库。
     </n-alert>
     <n-card title="生成 Agent 配置">
-      <n-tabs v-model:value="form.agent_type" type="segment" animated @update:value="selectAgent">
+      <n-tabs data-testid="agent-tabs" v-model:value="form.agent_type" type="segment" animated @update:value="selectAgent">
         <n-tab v-for="item in agentTypes" :key="item.value" :name="item.value">{{ item.label }}</n-tab>
       </n-tabs>
       <n-form label-placement="left" label-width="135" style="margin-top:20px">
@@ -15,11 +15,22 @@
         <n-form-item label="主模型">
           <n-select data-testid="agent-main-model" v-model:value="form.main_model_id" filterable clearable :options="modelOptions" :placeholder="`请选择支持 ${currentAgent.protocolLabel} 的统一模型`" />
         </n-form-item>
-        <n-form-item label="客户端 Token">
+        <template v-if="isClaudeCode">
+          <n-form-item label="Opus 模型">
+            <n-select data-testid="agent-opus-model" v-model:value="form.opus_model_id" filterable clearable :options="modelOptions" placeholder="可选；留空则使用主模型" />
+          </n-form-item>
+          <n-form-item label="Sonnet 模型">
+            <n-select data-testid="agent-sonnet-model" v-model:value="form.sonnet_model_id" filterable clearable :options="modelOptions" placeholder="可选；留空则使用主模型" />
+          </n-form-item>
+          <n-form-item label="Haiku 模型">
+            <n-select data-testid="agent-haiku-model" v-model:value="form.haiku_model_id" filterable clearable :options="modelOptions" placeholder="可选；留空则使用主模型" />
+          </n-form-item>
+        </template>
+        <n-form-item v-else label="客户端 Token">
           <n-input data-testid="agent-api-token" v-model:value="form.api_token" type="password" show-password-on="click" placeholder="可选；留空则保留现有值或使用环境变量" />
         </n-form-item>
         <n-alert type="default" style="margin-bottom:16px">
-          {{ currentAgent.description }} 需要的协议：{{ currentAgent.protocolLabel }}。端口变化时，已启用配置会再次备份并只更新网关地址。
+          {{ currentAgent.description }} 需要的协议：{{ currentAgent.protocolLabel }}。<template v-if="isClaudeCode">客户端 Token 继续通过 ANTHROPIC_AUTH_TOKEN 环境变量注入。</template> 端口变化时，已启用配置会再次备份并只更新网关地址。
         </n-alert>
         <n-space>
           <n-button data-testid="agent-preview" :loading="working" @click="preview">预览</n-button>
@@ -51,16 +62,21 @@ const agents = ref<any[]>([])
 const previewResult = ref<any>()
 const working = ref(false)
 const agentTypes = [
+  { label: 'Claude Code', value: 'claude-code', protocol: 'anthropic_messages', protocolLabel: 'Anthropic Messages', pathHint: '~/.claude/settings.json', description: '写入主模型及可选的 Opus、Sonnet、Haiku 模型映射。' },
   { label: 'Codex', value: 'codex', protocol: 'openai_responses', protocolLabel: 'OpenAI Responses', pathHint: '~/.codex/config.toml', description: '写入自定义 model_provider，并选择 APISwitch 统一模型。' },
   { label: 'OpenCode', value: 'opencode', protocol: 'openai_chat', protocolLabel: 'OpenAI Chat Completions', pathHint: '~/.config/opencode/opencode.json', description: '写入 OpenAI-compatible provider 和全局默认模型。' },
   { label: '龙虾（OpenClaw）', value: 'openclaw', protocol: 'openai_chat', protocolLabel: 'OpenAI Chat Completions', pathHint: '~/.openclaw/openclaw.json', description: '合并 APISwitch provider、模型目录和默认 Agent 模型。' },
   { label: 'Hermes', value: 'hermes', protocol: 'openai_chat', protocolLabel: 'OpenAI Chat Completions', pathHint: '~/.hermes/config.yaml', description: '写入 custom provider、默认模型与 OpenAI-compatible 地址。' },
-  { label: 'Gemini CLI', value: 'gemini-cli', protocol: 'gemini_v1beta', protocolLabel: 'Gemini v1beta', pathHint: '~/.gemini/.env', description: '写入 Gemini API Base URL、默认模型和可选客户端 Token。' }
+  { label: 'Gemini CLI', value: 'gemini-cli', protocol: 'gemini_v1beta', protocolLabel: 'Gemini v1beta', pathHint: '~/.gemini/.env', description: '写入 Gemini API Base URL、默认模型和可选客户端 Token。' },
+  { label: 'Langcli', value: 'langcli', protocol: 'openai_chat', protocolLabel: 'OpenAI Chat Completions', pathHint: '~/.langcli/settings.json', description: '合并 modelProviders.openai、自定义统一模型和 APISwitch 网关地址。' }
 ]
-const form = reactive<any>({ agent_type: 'codex', config_path: '', main_model_id: null, api_token: '' })
+const form = reactive<any>({ agent_type: 'codex', config_path: '', main_model_id: null, opus_model_id: null, sonnet_model_id: null, haiku_model_id: null, api_token: '' })
 const currentAgent = computed(() => agentTypes.find(item => item.value === form.agent_type) || agentTypes[0])
+const isClaudeCode = computed(() => form.agent_type === 'claude-code')
 const saved = computed(() => agents.value.find(item => item.agent_type === form.agent_type))
-const configuredAgents = computed(() => agents.value.filter(item => agentTypes.some(agent => agent.value === item.agent_type)))
+const configuredAgents = computed(() => agents.value
+  .filter(item => agentTypes.some(agent => agent.value === item.agent_type))
+  .map(item => ({ ...item, label: agentTypes.find(agent => agent.value === item.agent_type)?.label || item.agent_type })))
 const modelOptions = computed(() => models.value
   .filter(item => item.enabled && (item.enabled_protocols || []).includes(currentAgent.value.protocol))
   .map(item => ({ label: item.name, value: item.id })))
@@ -73,13 +89,24 @@ const columns: any[] = [
 ]
 
 function payload() {
-  return { config_path: form.config_path.trim() || undefined, main_model_id: form.main_model_id, api_token: form.api_token.trim() || undefined }
+  const result: any = { config_path: form.config_path.trim() || undefined, main_model_id: form.main_model_id }
+  if (isClaudeCode.value) {
+    result.opus_model_id = form.opus_model_id
+    result.sonnet_model_id = form.sonnet_model_id
+    result.haiku_model_id = form.haiku_model_id
+  } else {
+    result.api_token = form.api_token.trim() || undefined
+  }
+  return result
 }
 function selectAgent() {
   previewResult.value = undefined
   form.api_token = ''
   form.config_path = saved.value?.config_path || ''
   form.main_model_id = saved.value?.main_model_id || null
+  form.opus_model_id = saved.value?.opus_model_id || null
+  form.sonnet_model_id = saved.value?.sonnet_model_id || null
+  form.haiku_model_id = saved.value?.haiku_model_id || null
 }
 async function load() {
   const [modelRows, agentRows]: any[] = await Promise.all([getJson('/api/admin/unified-models'), getJson('/api/admin/agents')])
@@ -90,7 +117,17 @@ async function load() {
 async function preview() {
   if (!form.main_model_id) return message.warning('请选择主模型')
   working.value = true
-  try { previewResult.value = await postJson(`/api/admin/agents/${form.agent_type}/preview`, payload()) }
+  try {
+    const result: any = await postJson(`/api/admin/agents/${form.agent_type}/preview`, payload())
+    previewResult.value = {
+      ...result,
+      content: typeof result.content === 'string' ? result.content : JSON.stringify(result.content, null, 2),
+      language: result.language || 'json',
+      token_hint: result.token_hint || (isClaudeCode.value
+        ? 'Claude Code 客户端 Token 不写入设置文件，请通过 ANTHROPIC_AUTH_TOKEN 环境变量注入。'
+        : '客户端 Token 仅写入目标配置，不保存到 APISwitch 数据库。')
+    }
+  }
   catch (error) { message.error(String(error)) }
   finally { working.value = false }
 }

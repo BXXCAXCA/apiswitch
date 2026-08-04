@@ -216,16 +216,16 @@ describe('generation two product pages', () => {
     postMock.mockImplementation(async () => undefined as any)
   })
 
-  it('provides complete write flows for all five requested agents', async () => {
+  it('provides complete write flows for Claude Code, Langcli, and existing agents', async () => {
     const getMock = vi.mocked(getJson)
     const postMock = vi.mocked(postJson)
     getMock.mockImplementation(async (url: string) => url === '/api/admin/unified-models'
-      ? [{ id: 3, name: 'agent-all', enabled: true, enabled_protocols: ['openai_chat', 'openai_responses', 'gemini_v1beta'] }]
+      ? [{ id: 3, name: 'agent-all', enabled: true, enabled_protocols: ['anthropic_messages', 'openai_chat', 'openai_responses', 'gemini_v1beta'] }]
       : [] as any)
     postMock.mockResolvedValue({ config_path: 'C:/Users/test/.codex/config.toml', content: 'model = "agent-all"', language: 'toml', token_hint: '不保存 Token' } as any)
     const wrapper = mountWithMessage(AgentsV2View)
     await flushPromises()
-    for (const label of ['Codex', 'OpenCode', '龙虾（OpenClaw）', 'Hermes', 'Gemini CLI']) expect(wrapper.text()).toContain(label)
+    for (const label of ['Claude Code', 'Codex', 'OpenCode', '龙虾（OpenClaw）', 'Hermes', 'Gemini CLI', 'Langcli']) expect(wrapper.text()).toContain(label)
     const modelSelect: any = wrapper.findComponent('[data-testid="agent-main-model"]')
     expect(modelSelect.props('options')).toEqual([{ label: 'agent-all', value: 3 }])
     modelSelect.vm.$emit('update:value', 3)
@@ -233,6 +233,15 @@ describe('generation two product pages', () => {
     await flushPromises()
     expect(postMock).toHaveBeenCalledWith('/api/admin/agents/codex/preview', expect.objectContaining({ main_model_id: 3 }))
     expect(wrapper.text()).toContain('C:/Users/test/.codex/config.toml')
+
+    const tabs: any = wrapper.findComponent('[data-testid="agent-tabs"]')
+    tabs.vm.$emit('update:value', 'claude-code')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="agent-opus-model"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agent-api-token"]').exists()).toBe(false)
+    tabs.vm.$emit('update:value', 'langcli')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="agent-api-token"]').exists()).toBe(true)
     wrapper.unmount()
     getMock.mockImplementation(async () => [] as any)
     postMock.mockImplementation(async () => undefined as any)
@@ -393,6 +402,10 @@ describe('generation two product pages', () => {
     await flushPromises()
     const table: any = wrapper.findComponent('[data-testid="log-table"]')
     expect(table.props('columns').map((column: any) => column.title)).toEqual(['请求 ID', '协议', '供应商', '上游模型', '统一模型', '客户端名称', '状态', '延迟', '时间（UTC+8）', '操作'])
+    expect(table.props('pagination')).toBe(false)
+    expect(wrapper.find('[data-testid="log-top-scrollbar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="log-pagination"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="log-table-controls"]').text()).toContain('应用筛选')
     expect(wrapper.text()).toContain('桌面客户端')
     expect(wrapper.text()).not.toContain('失败阶段')
     expect(table.props('columns').some((column: any) => column.title === '成本')).toBe(false)

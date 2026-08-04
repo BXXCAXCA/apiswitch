@@ -16,7 +16,7 @@ from apiswitch.api.deps import authenticate_gateway_token, get_db, require_gatew
 from apiswitch.db.models import ApiToken, ApiTokenUnifiedModel, BatchJob, MediaJob, ProviderInstance, StoredFile, SystemSetting, UnifiedModel, UnifiedModelCandidate, UpstreamModel
 from apiswitch.db.session import SessionLocal
 from apiswitch.config import settings
-from apiswitch.protocols.canonical import CanonicalEvent, CanonicalRequest, CanonicalResponse, ProtocolError, from_anthropic, from_gemini, from_openai_chat, from_openai_responses, from_terminal, reasoning_signature, response_events, to_anthropic_response, to_gemini_response, to_openai_response
+from apiswitch.protocols.canonical import CanonicalEvent, CanonicalRequest, CanonicalResponse, ProtocolError, from_anthropic, from_gemini, from_openai_chat, from_openai_responses, from_terminal, reasoning_signature, response_events, to_anthropic_response, to_gemini_response, to_openai_response, to_openai_responses_usage
 from apiswitch.routing.engine import structured_error
 from apiswitch.routing.executor import execute_request
 
@@ -141,7 +141,7 @@ def render_egress(request: CanonicalRequest, upstream: CanonicalResponse, reques
         if upstream.reasoning_content:output.append({"id":"rs_"+request_id,"type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":upstream.reasoning_content}]})
         if upstream.text:output.append({"id":"msg_"+request_id,"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":upstream.text,"annotations":[]}]})
         output.extend({"id":item.get("id") or f"call_{index}","type":"function_call","status":"completed","call_id":item.get("id") or f"call_{index}","name":item.get("name",""),"arguments":json.dumps(item.get("arguments") or {},ensure_ascii=False,separators=(",",":"))} for index,item in enumerate(upstream.tool_calls))
-        return {"id":"resp_"+request_id,"object":"response","created_at":int(time.time()),"status":"completed","error":None,"incomplete_details":None,"instructions":request.instructions,"model":request.unified_model,"output":output,"output_text":upstream.text,"parallel_tool_calls":True,"tool_choice":request.tool_choice or "auto","tools":request.tools,"temperature":request.parameters.get("temperature"),"top_p":request.parameters.get("top_p"),"usage":upstream.usage or None,"metadata":{}}
+        return {"id":"resp_"+request_id,"object":"response","created_at":int(time.time()),"status":"completed","error":None,"incomplete_details":None,"instructions":request.instructions,"model":request.unified_model,"output":output,"output_text":upstream.text,"parallel_tool_calls":True,"tool_choice":request.tool_choice or "auto","tools":request.tools,"temperature":request.parameters.get("temperature"),"top_p":request.parameters.get("top_p"),"usage":to_openai_responses_usage(upstream.usage),"metadata":{}}
     return to_openai_response(request,upstream,request_id)
 
 
@@ -169,6 +169,7 @@ def render_sse(request: CanonicalRequest, events: list[CanonicalEvent]) -> list[
         return output
     if request.inbound_protocol == "openai_responses":
         response_id = "resp_" + events[0].request_id
+        created_at = int(time.time())
         sequence = 0
 
         def emit(event_type: str, **payload: Any) -> None:
@@ -181,7 +182,7 @@ def render_sse(request: CanonicalRequest, events: list[CanonicalEvent]) -> list[
             response={
                 "id": response_id,
                 "object": "response",
-                "created_at": int(time.time()),
+                "created_at": created_at,
                 "status": "in_progress",
                 "model": request.unified_model,
                 "output": [],
@@ -189,7 +190,7 @@ def render_sse(request: CanonicalRequest, events: list[CanonicalEvent]) -> list[
         )
         emit(
             "response.in_progress",
-            response={"id": response_id, "object": "response", "status": "in_progress", "model": request.unified_model, "output": []},
+            response={"id": response_id, "object": "response", "created_at": created_at, "status": "in_progress", "model": request.unified_model, "output": []},
         )
         output_index = 0
         for event in events:

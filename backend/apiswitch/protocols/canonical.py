@@ -197,6 +197,47 @@ def reasoning_signature(request_id: str, reasoning_content: str) -> str:
     return "apiswitch_v1_" + digest
 
 
+def _usage_number(value: Any) -> int:
+    """Return a non-negative integer without leaking malformed provider values."""
+    if isinstance(value, bool):
+        return 0
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _usage_details(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def to_openai_responses_usage(usage: dict[str, Any] | None) -> dict[str, Any]:
+    """Translate Chat-style usage into the OpenAI Responses usage schema.
+
+    OpenAI-compatible upstreams commonly return ``prompt_tokens`` and
+    ``completion_tokens``. Responses clients require ``input_tokens`` and
+    ``output_tokens`` on the final response event; returning Chat keys or null
+    makes strict clients treat an otherwise completed stream as finish reason
+    ``other``.
+    """
+    source = usage if isinstance(usage, dict) else {}
+    input_tokens = _usage_number(source.get("input_tokens", source.get("prompt_tokens")))
+    output_tokens = _usage_number(source.get("output_tokens", source.get("completion_tokens")))
+    total_tokens = _usage_number(source.get("total_tokens"))
+    total_tokens = max(total_tokens, input_tokens + output_tokens)
+    input_details = _usage_details(source.get("input_tokens_details") or source.get("prompt_tokens_details"))
+    output_details = _usage_details(source.get("output_tokens_details") or source.get("completion_tokens_details"))
+    input_details["cached_tokens"] = _usage_number(input_details.get("cached_tokens"))
+    output_details["reasoning_tokens"] = _usage_number(output_details.get("reasoning_tokens"))
+    return {
+        "input_tokens": input_tokens,
+        "input_tokens_details": input_details,
+        "output_tokens": output_tokens,
+        "output_tokens_details": output_details,
+        "total_tokens": total_tokens,
+    }
+
+
 def to_openai_response(request: CanonicalRequest, response: CanonicalResponse, request_id: str) -> dict[str, Any]:
     message:dict[str,Any]={"role":"assistant","content":response.text or (None if response.tool_calls else "")}
     if response.reasoning_content:message["reasoning_content"]=response.reasoning_content

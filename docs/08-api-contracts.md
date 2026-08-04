@@ -74,9 +74,14 @@
 - `POST /api/admin/agents/claude-code/preview`
 - `POST /api/admin/agents/claude-code/write`
 - `POST /api/admin/agents/claude-code/restore`
+- `POST /api/admin/agents/{agent_type}/preview`
+- `POST /api/admin/agents/{agent_type}/write`
+- `POST /api/admin/agents/{agent_type}/restore`
 - `POST /api/admin/agents/refresh-base-url`
 
-Claude Code 请求包含 main、opus、sonnet、haiku 四个统一模型 ID。写入前必须预览并备份。
+Claude Code 请求包含 main、opus、sonnet、haiku 四个统一模型 ID。通用 Agent 类型包括 Codex、OpenCode、OpenClaw、Hermes、Gemini CLI 和 Langcli。Langcli 写入 `~/.langcli/settings.json` 的 `modelProviders.openai`，使用统一模型名、当前 `/v1` 网关地址及 `APISWITCH_API_KEY`。所有写入均必须预览、备份、合并现有配置并原子替换。
+
+Claude Code 所选模型必须启用 Anthropic Messages；Langcli 所选模型必须启用 OpenAI Chat Completions。客户端 Token 只允许写入目标配置文件，不进入 APISwitch 数据库或接口响应。
 
 ## 8. WebDAV
 

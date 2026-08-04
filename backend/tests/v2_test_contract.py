@@ -98,17 +98,46 @@ def test_all_documented_gateway_entrypoints_use_the_token_protected_pipeline(cli
     assert status["health"]
 
 
-def test_agent_webdav_settings_and_structured_dry_run(client: TestClient, monkeypatch):
+def test_agent_webdav_settings_and_structured_dry_run(client: TestClient, monkeypatch, tmp_path):
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert client.patch("/api/admin/settings", json={"preferred_port": 8123, "upload_limit_bytes": 1234}).status_code == 200
     main_model = client.post(
         "/api/admin/unified-models",
-        json={"name": "claude-contract-main", "enabled_protocols": ["anthropic_messages"]},
+        json={"name": "agent-contract-main", "enabled_protocols": ["anthropic_messages", "openai_chat"]},
     ).json()
+    claude_target = tmp_path / ".claude" / "settings.json"
     preview = client.post(
         "/api/admin/agents/claude-code/preview",
-        json={"main_model_id": main_model["id"]},
+        json={"main_model_id": main_model["id"], "config_path": str(claude_target)},
     )
     assert preview.status_code == 200 and preview.json()["base_url"].startswith("http://127.0.0.1:")
+    claude_write = client.post(
+        "/api/admin/agents/claude-code/write",
+        json={"main_model_id": main_model["id"], "config_path": str(claude_target)},
+    )
+    assert claude_write.status_code == 200 and claude_target.is_file()
+
+    langcli_target = tmp_path / ".langcli" / "settings.json"
+    langcli_write = client.post(
+        "/api/admin/agents/langcli/write",
+        json={
+            "main_model_id": main_model["id"],
+            "config_path": str(langcli_target),
+            "api_token": "unit-only-langcli-token",
+        },
+    )
+    assert langcli_write.status_code == 200, langcli_write.text
+    import json
+    langcli = json.loads(langcli_target.read_text(encoding="utf-8"))
+    assert langcli["model"] == "custom:agent-contract-main"
+    assert langcli["env"]["APISWITCH_API_KEY"] == "unit-only-langcli-token"
+    assert langcli["modelProviders"]["openai"][-1] == {
+        "id": "agent-contract-main",
+        "name": "agent-contract-main",
+        "description": "APISwitch unified model",
+        "envKey": "APISWITCH_API_KEY",
+        "baseUrl": preview.json()["base_url"].rstrip("/") + "/v1",
+    }
     profile = client.post("/api/admin/webdav/profiles", json={"name": "mock-dav", "url": "https://dav.invalid/root", "username": "unit", "password": "not-a-real-secret", "backup_password": "separate-unit-password"})
     assert profile.status_code == 201
     monkeypatch.setattr("apiswitch.backup.webdav.test", lambda *args: None)
