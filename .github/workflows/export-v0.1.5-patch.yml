@@ -16,9 +16,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Reconstruct staged patch
+      - name: Reconstruct staged payload
         run: |
-          python - "$RUNNER_TEMP/v0.1.5.patch" <<'PY'
+          python - "$RUNNER_TEMP/v0.1.5.b64" "$RUNNER_TEMP/v0.1.5.patch" <<'PY'
           import base64
           import sys
           from pathlib import Path
@@ -27,12 +27,16 @@ jobs:
               ''.join(part.read_text(encoding='utf-8').split())
               for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*'))
           )
-          encoded += '=' * (-len(encoded) % 4)
-          Path(sys.argv[1]).write_bytes(base64.b64decode(encoded, validate=True))
+          Path(sys.argv[1]).write_text(encoded, encoding='ascii')
+          padded = encoded + '=' * (-len(encoded) % 4)
+          Path(sys.argv[2]).write_bytes(base64.b64decode(padded, validate=True))
           PY
+          wc -c "$RUNNER_TEMP/v0.1.5.b64" "$RUNNER_TEMP/v0.1.5.patch"
           sha256sum "$RUNNER_TEMP/v0.1.5.patch"
       - uses: actions/upload-artifact@v4
         with:
-          name: staged-v0.1.5-patch
-          path: ${{ runner.temp }}/v0.1.5.patch
+          name: staged-v0.1.5-payload
+          path: |
+            ${{ runner.temp }}/v0.1.5.b64
+            ${{ runner.temp }}/v0.1.5.patch
           if-no-files-found: error
