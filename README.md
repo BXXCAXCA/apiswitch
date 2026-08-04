@@ -11,7 +11,7 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 - 供应商模板中的真实云服务均明确标记为“未验证”或“兼容模式”；自动化验收只使用 Mock、模拟 HTTP 上游和固定协议样例。
 - 前端十二个管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
 - GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录、产物上传和 GitHub Release 发布。
-- 当前发布版本为 [`v0.1.7`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.7)：将 OpenAI Responses 流式完成事件压缩为跨 AI SDK 版本兼容的最小终止帧，追加标准 `[DONE]`，并在响应头暴露 APISwitch 版本与 SSE 兼容模式，修复正文已返回但 Cherry Studio 仍报告 `finish reason "other"` 的问题。
+- 当前发布版本为 [`v0.1.8`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.8)：除 OpenAI Responses 外，新增 Cherry Studio 自定义 OpenAI 供应商实际使用的 `/v1/chat/completions` 终止帧校验与兼容处理；保留明确的 `length`、`content_filter`、`tool_calls` 和未知结束原因，仅在 APISwitch 已成功完成但终止帧缺失时补发严格的 `stop` 与唯一 `[DONE]`，并通过响应头公开实际协议、版本和兼容模式。
 - 唯一确认延期项是“辅助调用链每一步的独立 Token、成本、延迟和预算归集”；基础辅助链日志、失败阶段和总请求统计已经实现。
 
 ## 最终产品流程
