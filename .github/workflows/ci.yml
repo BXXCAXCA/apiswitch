@@ -76,6 +76,8 @@ jobs:
       - frontend
       - sensitive-scan
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     env:
       PYTHONUTF8: '1'
     steps:
@@ -93,11 +95,13 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Read APISwitch version
+        id: version
         shell: pwsh
         run: |
           . ./scripts/version.ps1
           $version = Get-APISwitchVersion -RepositoryRoot (Get-Location).Path
           "APISWITCH_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Install Python dependencies
         run: python -m pip install --upgrade pip -r requirements.txt -r requirements-dev.txt
       - name: Install frontend dependencies
@@ -137,3 +141,27 @@ jobs:
             dist/diagnostics/*.json
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: package-windows
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: APISwitch-windows-x64-v${{ needs.package-windows.outputs.version }}
+          path: release
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.package-windows.outputs.version }}
+        run: |
+          tag="v${VERSION}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "APISwitch $tag" --generate-notes
+          fi
+          gh release upload "$tag" release/*.exe release/*.sha256.txt --clobber
