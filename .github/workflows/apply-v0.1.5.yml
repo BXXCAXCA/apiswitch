@@ -1,9 +1,6 @@
 name: Apply APISwitch v0.1.5
 
 on:
-  push:
-    branches:
-      - automation/apply-v0.1.5
   pull_request:
     branches:
       - main
