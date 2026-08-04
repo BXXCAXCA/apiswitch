@@ -46,11 +46,12 @@ jobs:
           import sys
           from pathlib import Path
 
-          output = bytearray()
-          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
-              encoded = ''.join(part.read_text(encoding='utf-8').split())
-              output.extend(base64.b64decode(encoded, validate=True))
-          Path(sys.argv[1]).write_bytes(output)
+          encoded = ''.join(
+              ''.join(part.read_text(encoding='utf-8').split())
+              for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*'))
+          )
+          encoded += '=' * (-len(encoded) % 4)
+          Path(sys.argv[1]).write_bytes(base64.b64decode(encoded, validate=True))
           PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
@@ -90,11 +91,12 @@ jobs:
           import sys
           from pathlib import Path
 
-          output = bytearray()
-          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
-              encoded = ''.join(part.read_text(encoding='utf-8').split())
-              output.extend(base64.b64decode(encoded, validate=True))
-          Path(sys.argv[1]).write_bytes(output)
+          encoded = ''.join(
+              ''.join(part.read_text(encoding='utf-8').split())
+              for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*'))
+          )
+          encoded += '=' * (-len(encoded) % 4)
+          Path(sys.argv[1]).write_bytes(base64.b64decode(encoded, validate=True))
           PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
@@ -136,11 +138,12 @@ jobs:
           import sys
           from pathlib import Path
 
-          output = bytearray()
-          for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*')):
-              encoded = ''.join(part.read_text(encoding='utf-8').split())
-              output.extend(base64.b64decode(encoded, validate=True))
-          Path(sys.argv[1]).write_bytes(output)
+          encoded = ''.join(
+              ''.join(part.read_text(encoding='utf-8').split())
+              for part in sorted(Path('.automation/v0.1.5').glob('patch.b64.part*'))
+          )
+          encoded += '=' * (-len(encoded) % 4)
+          Path(sys.argv[1]).write_bytes(base64.b64decode(encoded, validate=True))
           PY
           echo "$PATCH_SHA256  $RUNNER_TEMP/v0.1.5.patch" | sha256sum --check
           git fetch origin main
