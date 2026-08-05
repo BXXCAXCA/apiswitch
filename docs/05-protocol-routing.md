@@ -62,7 +62,7 @@ Ingress Adapter
 - 输入：text、vision、files、audio、video、tool_results、long_context
 - 输出：text、tools、json、embeddings、images、audio、video、music、moderation、rerank、search
 
-统一模型能力是候选能力和辅助工作流能够共同满足的声明。每次请求仍进行动态校验。
+统一模型能力是候选能力和辅助工作流能够共同满足的声明。启用的工作流按输入、输出方向扩展统一模型的有效能力，例如 `vision_to_text` 可让文本候选接收图片；每次请求仍进行动态校验，辅助步骤失败时不得绕过。
 
 ## 5. Combo 路由
 
@@ -117,6 +117,8 @@ Ingress Adapter
 | terminal_capability | Embedding、图片、语音、视频、音乐等由辅助模型直接产生终端结果 |
 
 工作流由有序步骤组成，每步声明输入能力、输出能力、超时和选模规则。不可组合的终端任务不能伪装成主模型能力。
+
+`vision_to_text` 会先让视觉辅助模型提取可见文字、界面状态和关键对象，去除供应商的 `<think>`/`<analysis>` 推理包装，再以带边界标记的文本写入主模型上下文。辅助模型返回空文本时步骤失败，不得以成功状态继续调用主模型。
 
 ### 8.3 失败
 

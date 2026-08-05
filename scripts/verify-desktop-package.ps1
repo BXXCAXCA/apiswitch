@@ -15,6 +15,8 @@ $reports = Join-Path $root "dist\diagnostics"
 $diagnosticHome = Join-Path ([IO.Path]::GetTempPath()) ("apiswitch-ci-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $reports -Force | Out-Null
 New-Item -ItemType Directory -Path $diagnosticHome -Force | Out-Null
+Get-ChildItem -LiteralPath $reports -Filter *.json -File -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
 $previousUserProfile = $env:USERPROFILE
 $previousInstanceId = $env:APISWITCH_DIAGNOSTIC_INSTANCE_ID

@@ -17,7 +17,7 @@ from apiswitch.db.models import ApiToken, ApiTokenUnifiedModel, BatchJob, MediaJ
 from apiswitch.db.session import SessionLocal
 from apiswitch.config import settings
 from apiswitch.protocols.canonical import CanonicalEvent, CanonicalRequest, CanonicalResponse, ProtocolError, from_anthropic, from_gemini, from_openai_chat, from_openai_responses, from_terminal, reasoning_signature, response_events, to_anthropic_response, to_gemini_response, to_openai_response, to_openai_responses_usage
-from apiswitch.routing.engine import structured_error
+from apiswitch.routing.engine import effective_unified_capabilities, structured_error
 from apiswitch.routing.executor import execute_request
 
 router = APIRouter(tags=["Gateway"])
@@ -68,7 +68,33 @@ def _callable_unified_models(db:Session,token:ApiToken)->list[UnifiedModel]:
 async def list_models(db:Session=Depends(get_db),token:ApiToken=Depends(require_gateway_token))->dict[str,Any]:
     """Return callable unified models using the OpenAI model-list shape."""
     rows=[row for row in _callable_unified_models(db,token) if {"openai_chat","openai_responses"}&set(row.enabled_protocols_json or [])]
-    return {"object":"list","data":[{"id":row.name,"object":"model","created":int(row.created_at.timestamp()),"owned_by":"apiswitch"} for row in rows]}
+    data=[]
+    for row in rows:
+        capabilities=effective_unified_capabilities(db,row)
+        input_modalities=[item for item in ("text","image","audio","file") if item in {
+            "text" if "text" in capabilities["input"] else "",
+            "image" if "vision" in capabilities["input"] else "",
+            "audio" if "audio" in capabilities["input"] else "",
+            "file" if "files" in capabilities["input"] else "",
+        }]
+        output_modalities=[item for item in ("text","image","audio") if item in {
+            "text" if "text" in capabilities["output"] else "",
+            "image" if "images" in capabilities["output"] else "",
+            "audio" if "audio" in capabilities["output"] else "",
+        }]
+        data.append({
+            "id":row.name,
+            "object":"model",
+            "created":int(row.created_at.timestamp()),
+            "owned_by":"apiswitch",
+            "capabilities":sorted(set(capabilities["input"]+capabilities["output"])),
+            "input_capabilities":capabilities["input"],
+            "output_capabilities":capabilities["output"],
+            "input_modalities":input_modalities,
+            "output_modalities":output_modalities,
+            "modalities":{"input":input_modalities,"output":output_modalities},
+        })
+    return {"object":"list","data":data}
 
 
 def _gemini_model_resource(row:UnifiedModel)->dict[str,Any]:

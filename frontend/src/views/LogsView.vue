@@ -5,41 +5,43 @@
       <n-button :loading="loading" @click="refresh">刷新</n-button>
     </n-space>
     <n-alert type="info">默认不保存完整 Prompt/Response。详情保留候选决策、基础辅助链、客户端名称、转换入口和错误类型。</n-alert>
-    <n-card title="筛选">
-      <div class="filter-grid">
-        <n-date-picker v-model:value="filters.range" type="datetimerange" clearable/>
-        <n-select v-model:value="filters.inbound_protocol" clearable :options="protocolOptions" placeholder="协议"/>
-        <n-select v-model:value="filters.unified_model" clearable filterable :options="unifiedOptions" placeholder="统一模型"/>
-        <n-select v-model:value="filters.provider_instance_id" clearable :options="providerOptions" placeholder="供应商"/>
-        <n-select v-model:value="filters.upstream_model_id" clearable filterable :options="upstreamOptions" placeholder="上游模型"/>
-        <n-select v-model:value="filters.success" clearable :options="statusOptions" placeholder="状态"/>
-        <div class="cost-range">
-          <n-input-number v-model:value="filters.min_cost" clearable :min="0" placeholder="最低成本"/>
-          <span>—</span>
-          <n-input-number v-model:value="filters.max_cost" clearable :min="0" placeholder="最高成本"/>
+    <div data-testid="log-card-stack" class="log-card-stack">
+      <n-card title="筛选">
+        <div class="filter-grid">
+          <n-date-picker v-model:value="filters.range" type="datetimerange" clearable/>
+          <n-select v-model:value="filters.inbound_protocol" clearable :options="protocolOptions" placeholder="协议"/>
+          <n-select v-model:value="filters.unified_model" clearable filterable :options="unifiedOptions" placeholder="统一模型"/>
+          <n-select v-model:value="filters.provider_instance_id" clearable :options="providerOptions" placeholder="供应商"/>
+          <n-select v-model:value="filters.upstream_model_id" clearable filterable :options="upstreamOptions" placeholder="上游模型"/>
+          <n-select v-model:value="filters.success" clearable :options="statusOptions" placeholder="状态"/>
+          <div class="cost-range">
+            <n-input-number v-model:value="filters.min_cost" clearable :min="0" placeholder="最低成本"/>
+            <span>—</span>
+            <n-input-number v-model:value="filters.max_cost" clearable :min="0" placeholder="最高成本"/>
+          </div>
+          <n-select data-testid="log-client-filter" v-model:value="filters.api_token_id" clearable :options="tokenOptions" placeholder="客户端名称（可选）"/>
         </div>
-        <n-select data-testid="log-client-filter" v-model:value="filters.api_token_id" clearable :options="tokenOptions" placeholder="客户端名称（可选）"/>
-      </div>
-    </n-card>
-    <n-card title="日志结果">
-      <div data-testid="log-table-controls" class="result-controls">
-        <n-space>
-          <n-button type="primary" @click="applyFilters">应用筛选</n-button>
-          <n-button @click="resetFilters">重置</n-button>
-        </n-space>
-        <n-space align="center">
-          <span class="result-count">共 {{ items.length }} 条</span>
-          <n-pagination data-testid="log-pagination" v-model:page="page" :page-count="pageCount" :page-size="pageSize" />
-        </n-space>
-      </div>
-      <n-empty v-if="!loading&&!items.length" description="暂无匹配日志"/>
-      <template v-else>
-        <div ref="topScrollbar" data-testid="log-top-scrollbar" class="top-scrollbar" @scroll="syncTableScroll">
-          <div class="top-scrollbar-content" :style="{width:`${tableScrollX}px`}"/>
+      </n-card>
+      <n-card title="日志结果">
+        <div data-testid="log-table-controls" class="result-controls">
+          <n-space>
+            <n-button type="primary" @click="applyFilters">应用筛选</n-button>
+            <n-button @click="resetFilters">重置</n-button>
+          </n-space>
+          <n-space align="center">
+            <span class="result-count">共 {{ items.length }} 条</span>
+            <n-pagination data-testid="log-pagination" v-model:page="page" :page-count="pageCount" :page-size="pageSize" />
+          </n-space>
         </div>
-        <n-data-table ref="tableRef" class="log-table" data-testid="log-table" :columns="columns" :data="pagedItems" :loading="loading" :pagination="false" :scroll-x="tableScrollX"/>
-      </template>
-    </n-card>
+        <n-empty v-if="!loading&&!items.length" description="暂无匹配日志"/>
+        <template v-else>
+          <div ref="topScrollbar" data-testid="log-top-scrollbar" class="top-scrollbar" @scroll="syncTableScroll">
+            <div class="top-scrollbar-content" :style="{width:`${tableScrollX}px`}"/>
+          </div>
+          <n-data-table ref="tableRef" class="log-table" data-testid="log-table" :columns="columns" :data="pagedItems" :loading="loading" :pagination="false" :scroll-x="tableScrollX"/>
+        </template>
+      </n-card>
+    </div>
     <n-modal v-model:show="showDetail" preset="card" title="调用详情" style="width:min(900px,92vw)">
       <n-code :code="JSON.stringify(detail,null,2)" language="json" word-wrap/>
     </n-modal>
@@ -68,6 +70,9 @@ const columns:any[]=[{title:'请求 ID',key:'request_id',width:220,ellipsis:{too
 onMounted(initialize)
 </script>
 <style scoped>
+.log-card-stack{display:flex;flex-direction:column;gap:0}
+.log-card-stack :deep(.n-card:first-child){border-bottom-right-radius:0;border-bottom-left-radius:0}
+.log-card-stack :deep(.n-card:last-child){margin-top:-1px;border-top-left-radius:0;border-top-right-radius:0}
 .filter-grid{display:grid;grid-template-columns:minmax(320px,1.6fr) repeat(3,minmax(170px,1fr));gap:12px;align-items:center}
 .filter-grid>*{min-width:0}
 .filter-grid :deep(.n-base-selection-placeholder),.filter-grid :deep(.n-input__placeholder){color:#667085!important;opacity:1}

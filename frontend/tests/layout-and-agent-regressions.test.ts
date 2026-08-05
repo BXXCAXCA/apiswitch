@@ -42,11 +42,14 @@ describe('call log layout regressions', () => {
     await flushPromises()
 
     const controls = wrapper.find('[data-testid="log-table-controls"]')
+    const cardStack = wrapper.find('[data-testid="log-card-stack"]')
     const pagination = wrapper.find('[data-testid="log-pagination"]')
     const scrollbar = wrapper.find('[data-testid="log-top-scrollbar"]')
     const table = wrapper.find('[data-testid="log-table"]')
 
     expect(controls.exists()).toBe(true)
+    expect(cardStack.exists()).toBe(true)
+    expect(cardStack.findAllComponents({ name: 'Card' })).toHaveLength(2)
     expect(controls.text()).toContain('应用筛选')
     expect(controls.text()).toContain('重置')
     expect(pagination.exists()).toBe(true)

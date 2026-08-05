@@ -73,6 +73,47 @@ def _applicable_workflows(db: Session, unified: UnifiedModel) -> list[AuxiliaryW
     return [item for item in workflows if item.unified_model_id is None and item.scope == "global"]
 
 
+def effective_unified_capabilities(db: Session, unified: UnifiedModel) -> dict[str, list[str]]:
+    """Return capabilities callers can use, including configured assistance.
+
+    Unified-model declarations describe the native/public contract, while an
+    auxiliary workflow can intentionally extend that contract (for example a
+    vision-to-text step in front of a text-only model).  Model discovery and
+    request validation must expose the same effective contract or clients will
+    discard attachments before APISwitch can process them.
+    """
+    declared = unified.required_capabilities_json or {}
+    inputs = set(declared.get("input", [])) if isinstance(declared, dict) else set()
+    outputs = set(declared.get("output", [])) if isinstance(declared, dict) else set()
+
+    rows = db.execute(
+        select(UnifiedModelCandidate, UpstreamModel)
+        .join(UpstreamModel, UnifiedModelCandidate.upstream_model_id == UpstreamModel.id)
+        .where(
+            UnifiedModelCandidate.unified_model_id == unified.id,
+            UnifiedModelCandidate.enabled.is_(True),
+            UpstreamModel.enabled.is_(True),
+            UpstreamModel.remote_status != "missing",
+        )
+    ).all()
+    if not inputs:
+        for candidate, upstream in rows:
+            overrides = candidate.capability_overrides_json or {}
+            inputs.update(overrides.get("input", upstream.input_capabilities_json or []))
+    if not outputs:
+        for candidate, upstream in rows:
+            overrides = candidate.capability_overrides_json or {}
+            outputs.update(overrides.get("output", upstream.output_capabilities_json or []))
+
+    for workflow in _applicable_workflows(db, unified):
+        inputs.add(workflow.input_capability)
+        outputs.add(workflow.output_capability)
+
+    inputs.add("text")
+    outputs.add("text")
+    return {"input": sorted(inputs), "output": sorted(outputs)}
+
+
 def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedModel, list[RouteCandidate], list[dict[str, Any]]]:
     unified = db.scalar(select(UnifiedModel).where(UnifiedModel.name == request.unified_model, UnifiedModel.enabled.is_(True)))
     if not unified: raise ProtocolError("provider_unavailable", "统一模型不存在或未启用", "model_lookup")
@@ -80,11 +121,15 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
     if request.inbound_protocol not in enabled_protocols:
         raise ProtocolError("protocol_not_enabled", "统一模型未开启该入口协议", "protocol_check", {"protocol": request.inbound_protocol})
     expected = set(request.required_input + request.required_output)
+    workflows = _applicable_workflows(db, unified)
+    assisted_input_capabilities = {workflow.input_capability for workflow in workflows}
+    assisted_output_capabilities = {workflow.output_capability for workflow in workflows}
+    assisted_capabilities = assisted_input_capabilities | assisted_output_capabilities
     declared=unified.required_capabilities_json or {}
     if isinstance(declared,dict):
         declared_input=set(declared.get("input",[]));declared_output=set(declared.get("output",[]))
-        missing_input=set(request.required_input)-declared_input if declared_input else set()
-        missing_output=set(request.required_output)-declared_output if declared_output else set()
+        missing_input=set(request.required_input)-declared_input-assisted_input_capabilities if declared_input else set()
+        missing_output=set(request.required_output)-declared_output-assisted_output_capabilities if declared_output else set()
         if missing_input or missing_output:
             raise ProtocolError(
                 "capability_not_supported",
@@ -92,8 +137,6 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
                 "capability_check",
                 {"missing_input":sorted(missing_input),"missing_output":sorted(missing_output)},
             )
-    workflows = _applicable_workflows(db, unified)
-    assisted_capabilities = {capability for workflow in workflows for capability in (workflow.input_capability, workflow.output_capability)}
     rows = db.execute(select(UnifiedModelCandidate, UpstreamModel, ProviderInstance).join(UpstreamModel, UnifiedModelCandidate.upstream_model_id == UpstreamModel.id).join(ProviderInstance, UpstreamModel.provider_instance_id == ProviderInstance.id).where(UnifiedModelCandidate.unified_model_id == unified.id)).all()
     upstream_ids=[upstream.id for _,upstream,_ in rows]
     latest_quotas:dict[int,QuotaSnapshot]={}

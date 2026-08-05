@@ -5,6 +5,7 @@ can use ``httpx.MockTransport`` without contacting a real provider.
 """
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from types import SimpleNamespace
@@ -681,7 +682,21 @@ async def _run_auxiliary_steps(db:Session,request:CanonicalRequest,plan:dict[str
             source_text=(post_response or {}).get("text")
             messages=list(request.messages)
             if source_text is not None:messages=[{"role":"user","content":f"请校验并修复以下输出，保持语义不变：\n{source_text}"}]
-            aux_request=CanonicalRequest("chat",request.inbound_protocol,request.unified_model,messages=messages,instructions=f"执行辅助工作流 {step.get('workflow_type')}，只返回处理结果。",required_input=[str(step.get("input","text"))],required_output=[str(step.get("output","text"))])
+            workflow_type=str(step.get("workflow_type") or "")
+            instructions=(
+                "你是图像识别辅助模型。请围绕用户当前问题准确识别每张图片，先给出可直接支持回答的结论，"
+                "再简短列出可见文字、界面状态或关键对象作为证据。不要猜测图片中不存在的内容，"
+                "不要讨论你的推理过程，只返回可供文本模型作答的图像事实。"
+                if workflow_type == "vision_to_text"
+                else f"执行辅助工作流 {workflow_type}，只返回处理结果。"
+            )
+            aux_request=CanonicalRequest(
+                "chat",request.inbound_protocol,request.unified_model,messages=messages,
+                instructions=instructions,
+                parameters={"temperature":0.1,"max_tokens":1200},
+                required_input=[str(step.get("input","text"))],
+                required_output=[str(step.get("output","text"))],
+            )
         timeout=min(float(provider.timeout_seconds),float(step.get("timeout_seconds") or provider.timeout_seconds))
         provider_values={column.name:getattr(provider,column.name) for column in provider.__table__.columns};provider_values["timeout_seconds"]=timeout
         provider_for_step=SimpleNamespace(**provider_values)
@@ -689,15 +704,30 @@ async def _run_auxiliary_steps(db:Session,request:CanonicalRequest,plan:dict[str
         except ProtocolError as exc:
             step["status"]="failed";step["error_type"]=exc.error_type
             raise ProtocolError("auxiliary_step_failed","辅助步骤执行失败","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"],"cause":exc.error_type}) from exc
+        result_text=_clean_auxiliary_text(str(result.get("text") or ""))
+        if step.get("workflow_type") != "terminal_capability" and not result_text:
+            step["status"]="failed";step["error_type"]="empty_auxiliary_response"
+            raise ProtocolError("auxiliary_step_failed","辅助模型没有返回可注入的文本结果","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"],"cause":"empty_auxiliary_response"})
         step["status"]="succeeded"
+        if result_text:step["output_chars"]=len(result_text)
         if step.get("workflow_type")=="terminal_capability":terminal_response=result
         elif is_post:post_response=result
-        elif result.get("text"):
+        elif result_text:
             if step.get("workflow_type") == "vision_to_text":
-                request.messages = _replace_vision_content(request.messages, str(result["text"]))
+                request.messages = _replace_vision_content(request.messages, result_text)
             else:
-                request.messages=[*request.messages,{"role":"system","content":f"辅助工作流 {step.get('workflow_type')} 结果：\n{result['text']}"}]
+                request.messages=[*request.messages,{"role":"system","content":f"辅助工作流 {step.get('workflow_type')} 结果：\n{result_text}"}]
     return request,terminal_response or post_response
+
+
+def _clean_auxiliary_text(text:str)->str:
+    """Remove provider reasoning wrappers before injecting auxiliary output."""
+    original=text.strip()
+    if not original:return ""
+    cleaned=re.sub(r"<(think|analysis)\b[^>]*>.*?</\1\s*>","",original,flags=re.IGNORECASE|re.DOTALL)
+    cleaned=re.sub(r"<(think|analysis)\b[^>]*>.*\Z","",cleaned,flags=re.IGNORECASE|re.DOTALL)
+    cleaned=re.sub(r"</?(think|analysis)\b[^>]*>","",cleaned,flags=re.IGNORECASE)
+    return cleaned.strip()
 
 
 def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list[dict[str,Any]]:
@@ -722,7 +752,12 @@ def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list
             text = "\n".join(item for item in parts if item.strip())
             if text:
                 text += "\n"
-            text += f"图片描述：{description}"
+            text += (
+                "[APISwitch 图像辅助识别结果]\n"
+                f"{description}\n"
+                "[/APISwitch 图像辅助识别结果]\n"
+                "请根据以上识别结果回答当前问题。"
+            )
             updated = dict(message)
             updated["content"] = text
             replaced.append(updated)

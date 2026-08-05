@@ -55,8 +55,61 @@ def test_vision_to_text_replaces_images_before_text_only_main_model(client: Test
     main_request = next(item for item in captured if item["model"] == "main-text")
     content = main_request["messages"][0]["content"]
     assert isinstance(content, str)
-    assert "图片描述：" in content
+    assert "APISwitch 图像辅助识别结果" in content
     assert "image_url" not in content
+
+
+def test_auxiliary_reasoning_wrapper_is_not_injected_into_main_prompt():
+    from apiswitch.routing.executor import _clean_auxiliary_text, _replace_vision_content
+
+    description = _clean_auxiliary_text("<think>private reasoning</think>Visible car description")
+    messages = _replace_vision_content(_vision_request("model")["messages"], description)
+    content = messages[0]["content"]
+    assert "private reasoning" not in content
+    assert "Visible car description" in content
+    assert "APISwitch 图像辅助识别结果" in content
+    assert _clean_auxiliary_text("<think>unfinished private reasoning") == ""
+
+
+def test_auxiliary_workflow_extends_declared_unified_input_capabilities(client: TestClient):
+    provider = client.post(
+        "/api/admin/provider-instances",
+        json={"name": f"aux-declared-{uuid4().hex}", "template_key": "openai", "base_url": "mock://auxiliary"},
+    ).json()
+    main = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "declared-main-text", "input_capabilities_json": ["text"], "output_capabilities_json": ["text"]},
+    ).json()
+    auxiliary = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "declared-vision-helper", "input_capabilities_json": ["text", "vision"], "output_capabilities_json": ["text"]},
+    ).json()
+    unified = client.post(
+        "/api/admin/unified-models",
+        json={
+            "name": f"declared-assisted-{uuid4().hex}",
+            "enabled_protocols": ["openai_chat"],
+            "required_capabilities": {"input": ["text"], "output": ["text"]},
+        },
+    ).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates", json={"upstream_model_id": main["id"]})
+    client.post("/api/admin/auxiliary/models", json={"upstream_model_id": auxiliary["id"], "capabilities": ["vision"]})
+    client.post(
+        "/api/admin/auxiliary/workflows",
+        json={"workflow_type": "vision_to_text", "input_capability": "vision", "output_capability": "text"},
+    )
+    token = client.post("/api/admin/tokens", json={"name": "declared-aux-client", "unified_model_ids": [unified["id"]]}).json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    models = client.get("/v1/models", headers=headers).json()["data"]
+    advertised = next(item for item in models if item["id"] == unified["name"])
+    assert "vision" in advertised["input_capabilities"]
+    assert "image" in advertised["modalities"]["input"]
+
+    response = client.post("/v1/chat/completions", headers=headers, json=_vision_request(unified["name"]))
+    assert response.status_code == 200, response.text
+    log = client.get("/api/admin/logs").json()[0]
+    assert log["auxiliary_summary"]["steps"][0]["status"] == "succeeded"
 
 
 def test_auxiliary_workflow_without_configured_model_fails_before_main_call(client: TestClient):
