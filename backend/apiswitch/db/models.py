@@ -164,6 +164,8 @@ class RequestLog(Base):
     __tablename__ = "request_logs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     request_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    request_kind: Mapped[str] = mapped_column(String(32), default="main", index=True)
+    parent_request_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     inbound_protocol: Mapped[str] = mapped_column(String(64))

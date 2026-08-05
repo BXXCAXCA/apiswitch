@@ -62,8 +62,13 @@ def test_every_workflow_stops_on_timeout_upstream_failure_or_incompatibility(cli
     assert error["details"]["cause"]==expected
     assert all(item.get("model")=="aux-model" for item in calls)
     assert len(calls)==(0 if failure=="incompatible" else 1)
-    log=client.get("/api/admin/logs").json()[0]
+    logs=client.get("/api/admin/logs").json()
+    log=next(item for item in logs if item["request_kind"]=="main")
+    auxiliary_log=next(item for item in logs if item["request_kind"]=="auxiliary")
     assert log["failure_stage"]=="auxiliary_step"
+    assert auxiliary_log["parent_request_id"]==log["request_id"]
+    assert auxiliary_log["success"] is False
+    assert auxiliary_log["error_type"]==expected
 
 
 def test_per_unified_model_mode_executes_only_scoped_auxiliary_configuration(client,monkeypatch):

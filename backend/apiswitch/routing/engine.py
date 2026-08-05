@@ -122,21 +122,22 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
         raise ProtocolError("protocol_not_enabled", "统一模型未开启该入口协议", "protocol_check", {"protocol": request.inbound_protocol})
     expected = set(request.required_input + request.required_output)
     workflows = _applicable_workflows(db, unified)
-    assisted_input_capabilities = {workflow.input_capability for workflow in workflows}
-    assisted_output_capabilities = {workflow.output_capability for workflow in workflows}
-    assisted_capabilities = assisted_input_capabilities | assisted_output_capabilities
+    assisted_capabilities = {capability for workflow in workflows for capability in (workflow.input_capability, workflow.output_capability)}
     declared=unified.required_capabilities_json or {}
-    if isinstance(declared,dict):
-        declared_input=set(declared.get("input",[]));declared_output=set(declared.get("output",[]))
-        missing_input=set(request.required_input)-declared_input-assisted_input_capabilities if declared_input else set()
-        missing_output=set(request.required_output)-declared_output-assisted_output_capabilities if declared_output else set()
-        if missing_input or missing_output:
-            raise ProtocolError(
-                "capability_not_supported",
-                "请求超出统一模型声明的能力范围",
-                "capability_check",
-                {"missing_input":sorted(missing_input),"missing_output":sorted(missing_output)},
-            )
+    declared_input=set(declared.get("input",[])) if isinstance(declared,dict) else set()
+    declared_output=set(declared.get("output",[])) if isinstance(declared,dict) else set()
+    # Text is the baseline capability advertised by model discovery and must
+    # remain callable even when an older client saved only an added modality
+    # such as vision in the explicit declaration.
+    missing_input=set(request.required_input)-(declared_input|{"text"})-assisted_capabilities if declared_input else set()
+    missing_output=set(request.required_output)-(declared_output|{"text"})-assisted_capabilities if declared_output else set()
+    if missing_input or missing_output:
+        raise ProtocolError(
+            "capability_not_supported",
+            "请求超出统一模型声明的能力范围",
+            "capability_check",
+            {"missing_input":sorted(missing_input),"missing_output":sorted(missing_output)},
+        )
     rows = db.execute(select(UnifiedModelCandidate, UpstreamModel, ProviderInstance).join(UpstreamModel, UnifiedModelCandidate.upstream_model_id == UpstreamModel.id).join(ProviderInstance, UpstreamModel.provider_instance_id == ProviderInstance.id).where(UnifiedModelCandidate.unified_model_id == unified.id)).all()
     upstream_ids=[upstream.id for _,upstream,_ in rows]
     latest_quotas:dict[int,QuotaSnapshot]={}

@@ -11,8 +11,8 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 - 供应商模板中的真实云服务均明确标记为“未验证”或“兼容模式”；自动化验收只使用 Mock、模拟 HTTP 上游和固定协议样例。
 - 前端十二个管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
 - GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录、产物上传和 GitHub Release 发布。
-- 当前发布版本为 [`v0.1.9`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.9)：图像转文本辅助工作流可扩展文本统一模型的公开输入能力，`/v1/models` 会同步声明有效的图像模态；辅助识别结果在去除推理包装后注入主模型，空结果会明确报错。调用日志筛选区与结果区改为无缝衔接。
-- 唯一确认延期项是“辅助调用链每一步的独立 Token、成本、延迟和预算归集”；基础辅助链日志、失败阶段和总请求统计已经实现。
+- 当前发布版本为 [`v0.1.10`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.10)：修正模型目录与路由能力校验不一致；主调用和每个辅助步骤分别记录日志，并通过父请求 ID 关联，辅助行包含供应商、上游模型、Token、成本、延迟和错误。不可恢复的空上游响应不再伪装为成功。
+- 唯一确认延期项是“辅助步骤成本进入预算上限与执行动作”；逐步骤日志、Token、成本、延迟和用量聚合已经实现。
 
 ## 最终产品流程
 

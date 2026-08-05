@@ -394,19 +394,20 @@ describe('generation two product pages', () => {
   it('shows the requested log columns and client name without failure-stage or cost columns', async () => {
     const getMock = vi.mocked(getJson)
     getMock.mockImplementation(async (url: string) => {
-      if (url.startsWith('/api/admin/logs?')) return [{ request_id: 'req_unit', inbound_protocol: 'openai_chat', provider_name: '供应商 A', upstream_model_name: 'model-a', unified_model: 'stable-a', api_token_id: 7, api_token_name: '桌面客户端', success: true, latency_ms: 12.3, started_at: '2026-07-18T00:00:00Z' }] as any
+      if (url.startsWith('/api/admin/logs?')) return [{ request_id: 'req_unit', request_kind: 'auxiliary', parent_request_id: 'req_parent', inbound_protocol: 'auxiliary', provider_name: '供应商 A', upstream_model_name: 'model-a', unified_model: 'stable-a', api_token_id: 7, api_token_name: '桌面客户端', success: true, latency_ms: 12.3, started_at: '2026-07-18T00:00:00Z' }] as any
       if (url === '/api/admin/tokens') return [{ id: 7, name: '桌面客户端', prefix: 'ask_unit' }] as any
       return [] as any
     })
     const wrapper = mountWithMessage(LogsView)
     await flushPromises()
     const table: any = wrapper.findComponent('[data-testid="log-table"]')
-    expect(table.props('columns').map((column: any) => column.title)).toEqual(['请求 ID', '协议', '供应商', '上游模型', '统一模型', '客户端名称', '状态', '延迟', '时间（UTC+8）', '操作'])
+    expect(table.props('columns').map((column: any) => column.title)).toEqual(['请求 ID', '调用类型', '协议', '供应商', '上游模型', '统一模型', '客户端名称', '状态', '延迟', '时间（UTC+8）', '操作'])
     expect(table.props('pagination')).toBe(false)
     expect(wrapper.find('[data-testid="log-top-scrollbar"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="log-pagination"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="log-table-controls"]').text()).toContain('应用筛选')
     expect(wrapper.text()).toContain('桌面客户端')
+    expect(wrapper.text()).toContain('辅助')
     expect(wrapper.text()).not.toContain('失败阶段')
     expect(table.props('columns').some((column: any) => column.title === '成本')).toBe(false)
     const clientFilter: any = wrapper.findComponent('[data-testid="log-client-filter"]')

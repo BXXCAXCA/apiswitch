@@ -28,11 +28,18 @@ def test_configured_auxiliary_workflow_executes_before_main_candidate(client: Te
     response = client.post("/v1/chat/completions", headers=headers, json=_vision_request(unified["name"]))
 
     assert response.status_code == 200, response.text
-    log = client.get("/api/admin/logs").json()[0]
+    logs = client.get("/api/admin/logs").json()
+    log = next(item for item in logs if item["request_kind"] == "main")
+    auxiliary_log = next(item for item in logs if item["request_kind"] == "auxiliary")
     assert log["success"] is True
     assert log["auxiliary_summary"]["mode"] == "global_pool"
     assert log["auxiliary_summary"]["steps"][0]["status"] == "succeeded"
     assert log["auxiliary_summary"]["steps"][0]["upstream_model_id"] == auxiliary["id"]
+    assert auxiliary_log["parent_request_id"] == log["request_id"]
+    assert auxiliary_log["provider_instance_id"] is not None
+    assert auxiliary_log["upstream_model_id"] == auxiliary["id"]
+    assert auxiliary_log["inbound_protocol"] == "auxiliary"
+    assert client.get("/api/admin/logs", params={"request_kind": "auxiliary"}).json() == [auxiliary_log]
 
 
 def test_vision_to_text_replaces_images_before_text_only_main_model(client: TestClient, monkeypatch):
@@ -89,7 +96,7 @@ def test_auxiliary_workflow_extends_declared_unified_input_capabilities(client: 
         json={
             "name": f"declared-assisted-{uuid4().hex}",
             "enabled_protocols": ["openai_chat"],
-            "required_capabilities": {"input": ["text"], "output": ["text"]},
+            "required_capabilities": {"input": ["vision"], "output": []},
         },
     ).json()
     client.post(f"/api/admin/unified-models/{unified['id']}/candidates", json={"upstream_model_id": main["id"]})
@@ -104,6 +111,7 @@ def test_auxiliary_workflow_extends_declared_unified_input_capabilities(client: 
     models = client.get("/v1/models", headers=headers).json()["data"]
     advertised = next(item for item in models if item["id"] == unified["name"])
     assert "vision" in advertised["input_capabilities"]
+    assert "text" in advertised["input_capabilities"]
     assert "image" in advertised["modalities"]["input"]
 
     response = client.post("/v1/chat/completions", headers=headers, json=_vision_request(unified["name"]))

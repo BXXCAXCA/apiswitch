@@ -107,6 +107,8 @@ Claude Code 所选模型必须启用 Anthropic Messages；Langcli 所选模型�
 - 产生统一请求 ID。
 - 经过能力、辅助链、Combo、预算和日志管线。
 
+`GET /api/admin/logs` 返回 `request_kind`（`main`/`auxiliary`）和 `parent_request_id`。辅助调用使用 `inbound_protocol=auxiliary`，支持通过 `request_kind` 单独筛选。
+
 Files 接口提供当前 Token 隔离的完整本地文件生命周期：
 
 - `POST /v1/files` 上传 multipart 文件。

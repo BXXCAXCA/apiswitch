@@ -78,6 +78,13 @@ def _ensure_generation_two_columns(path: Path | None) -> None:
             connection.execute("ALTER TABLE request_logs ADD COLUMN first_token_latency_ms FLOAT")
         if columns and "api_token_prefix_snapshot" not in columns:
             connection.execute("ALTER TABLE request_logs ADD COLUMN api_token_prefix_snapshot VARCHAR(32)")
+        if columns and "request_kind" not in columns:
+            connection.execute("ALTER TABLE request_logs ADD COLUMN request_kind VARCHAR(32) NOT NULL DEFAULT 'main'")
+        if columns and "parent_request_id" not in columns:
+            connection.execute("ALTER TABLE request_logs ADD COLUMN parent_request_id VARCHAR(128)")
+        if columns:
+            connection.execute("CREATE INDEX IF NOT EXISTS ix_request_logs_request_kind ON request_logs(request_kind)")
+            connection.execute("CREATE INDEX IF NOT EXISTS ix_request_logs_parent_request_id ON request_logs(parent_request_id)")
         breaker_columns = {row[1] for row in connection.execute("PRAGMA table_info(circuit_breakers)")}
         additions = {
             "half_open_at": "DATETIME",

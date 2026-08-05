@@ -670,7 +670,41 @@ async def probe_model(provider: ProviderInstance, upstream: UpstreamModel) -> di
     }
 
 
-async def _run_auxiliary_steps(db:Session,request:CanonicalRequest,plan:dict[str,Any],*,post_response:CanonicalResponse|None=None)->tuple[CanonicalRequest,CanonicalResponse|None]:
+def _record_auxiliary_log(
+    db:Session,request:CanonicalRequest,step:dict[str,Any],*,parent_request_id:str,
+    request_id:str,started:Any,provider:ProviderInstance,upstream:UpstreamModel,
+    api_token_id:int|None,token_prefix_snapshot:str|None,result:CanonicalResponse|None=None,
+    error:ProtocolError|None=None,
+)->None:
+    latency_ms=(time.perf_counter()-step.pop("_clock"))*1000
+    usage=(result.get("usage") or {}) if result is not None else {}
+    input_tokens=int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    cost=(input_tokens*(upstream.input_price or 0)+output_tokens*(upstream.output_price or 0))/1_000_000
+    step.update({"request_id":request_id,"parent_request_id":parent_request_id,"latency_ms":latency_ms,"input_tokens":input_tokens,"output_tokens":output_tokens,"estimated_cost":cost})
+    summary={key:step.get(key) for key in ("workflow_id","workflow_type","step_index","input","output","status","parent_request_id")}
+    db.add(RequestLog(
+        request_id=request_id,request_kind="auxiliary",parent_request_id=parent_request_id,
+        started_at=started,finished_at=utc_now(),inbound_protocol="auxiliary",
+        unified_model=request.unified_model,provider_instance_id=provider.id,upstream_model_id=upstream.id,
+        auxiliary_summary_json=summary,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,
+        input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,latency_ms=latency_ms,
+        first_token_latency_ms=latency_ms,success=error is None,error_type=error.error_type if error else None,
+        error_message=str(error) if error else None,failure_stage=error.stage if error else None,
+    ))
+    if error is None:
+        db.add(UsageHistory(
+            request_id=request_id,api_token_id=api_token_id,provider_instance_id=provider.id,
+            upstream_model_id=upstream.id,unified_model=request.unified_model,inbound_protocol="auxiliary",
+            input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,
+        ))
+
+
+async def _run_auxiliary_steps(
+    db:Session,request:CanonicalRequest,plan:dict[str,Any],*,parent_request_id:str,
+    api_token_id:int|None=None,token_prefix_snapshot:str|None=None,
+    post_response:CanonicalResponse|None=None,
+)->tuple[CanonicalRequest,CanonicalResponse|None]:
     terminal_response:CanonicalResponse|None=None
     for step in plan.get("steps",[]):
         is_post=step.get("workflow_type")=="structured_repair"
@@ -700,16 +734,20 @@ async def _run_auxiliary_steps(db:Session,request:CanonicalRequest,plan:dict[str
         timeout=min(float(provider.timeout_seconds),float(step.get("timeout_seconds") or provider.timeout_seconds))
         provider_values={column.name:getattr(provider,column.name) for column in provider.__table__.columns};provider_values["timeout_seconds"]=timeout
         provider_for_step=SimpleNamespace(**provider_values)
-        try:result=await _call_http(SimpleNamespace(provider=provider_for_step,upstream=upstream),aux_request)
+        auxiliary_request_id=f"{parent_request_id}:aux:{step['workflow_id']}:{step['step_index']}:{uuid.uuid4().hex[:8]}"
+        step_started=utc_now();step["_clock"]=time.perf_counter()
+        try:
+            result=await _call_http(SimpleNamespace(provider=provider_for_step,upstream=upstream),aux_request)
+            result_text=_clean_auxiliary_text(str(result.get("text") or ""))
+            if step.get("workflow_type") != "terminal_capability" and not result_text:
+                raise ProtocolError("empty_auxiliary_response","辅助模型没有返回可注入的文本结果","auxiliary_step")
         except ProtocolError as exc:
             step["status"]="failed";step["error_type"]=exc.error_type
+            _record_auxiliary_log(db,request,step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,error=exc)
             raise ProtocolError("auxiliary_step_failed","辅助步骤执行失败","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"],"cause":exc.error_type}) from exc
-        result_text=_clean_auxiliary_text(str(result.get("text") or ""))
-        if step.get("workflow_type") != "terminal_capability" and not result_text:
-            step["status"]="failed";step["error_type"]="empty_auxiliary_response"
-            raise ProtocolError("auxiliary_step_failed","辅助模型没有返回可注入的文本结果","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"],"cause":"empty_auxiliary_response"})
         step["status"]="succeeded"
         if result_text:step["output_chars"]=len(result_text)
+        _record_auxiliary_log(db,request,step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,result=result)
         if step.get("workflow_type")=="terminal_capability":terminal_response=result
         elif is_post:post_response=result
         elif result_text:
@@ -827,7 +865,7 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
         unified,candidates,explanation=route_candidates(db,request)
         preflight=_exceeded(_budgets(db,request,unified,api_token_id))
         candidates=_apply_exceeded_budget_actions(preflight,candidates)
-        auxiliary=plan_auxiliary(db,request,unified);request,terminal_response=await _run_auxiliary_steps(db,request,auxiliary);last_error:ProtocolError|None=None
+        auxiliary=plan_auxiliary(db,request,unified);request,terminal_response=await _run_auxiliary_steps(db,request,auxiliary,parent_request_id=request_id,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot);last_error:ProtocolError|None=None
         for candidate in candidates:
             selected=candidate;attempt=time.perf_counter()
             scoped_rejected=[row for row in _exceeded(_budgets(db,request,unified,api_token_id,candidate.provider.id,candidate.upstream.id)) if row.scope in {"provider","provider_instance","upstream_model"} and row.enforcement_action in {"reject","fallback_to_free","fallback_to_cheapest","degrade"}]
@@ -845,7 +883,7 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
                 raise ProtocolError(last_error.error_type,str(last_error),last_error.stage,{**last_error.details,"candidates":explanation})
             raise ProtocolError("provider_unavailable","统一模型的全部候选调用失败","upstream_call",{"candidates":explanation})
         if any(step.get("workflow_type")=="structured_repair" for step in auxiliary.get("steps",[])):
-            request,repaired=await _run_auxiliary_steps(db,request,auxiliary,post_response=response);response=repaired or response
+            request,repaired=await _run_auxiliary_steps(db,request,auxiliary,parent_request_id=request_id,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,post_response=response);response=repaired or response
         usage=response.get("usage") or {};input_tokens=int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0);output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
         cost=(input_tokens*(selected.upstream.input_price or 0)+output_tokens*(selected.upstream.output_price or 0))/1_000_000
         accumulate_budget_spend(db,estimated_cost=cost,api_token_id=api_token_id,provider_id=selected.provider.id,upstream_model_id=selected.upstream.id,unified_model=request.unified_model,unified_model_id=unified.id)

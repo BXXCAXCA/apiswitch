@@ -28,6 +28,8 @@ describe('call log layout regressions', () => {
       if (url.startsWith('/api/admin/logs?')) {
         return [{
           request_id: 'req_layout',
+          request_kind: 'auxiliary',
+          parent_request_id: 'req_parent',
           inbound_protocol: 'openai_responses',
           unified_model: 'client-model',
           success: true,
@@ -43,18 +45,21 @@ describe('call log layout regressions', () => {
 
     const controls = wrapper.find('[data-testid="log-table-controls"]')
     const cardStack = wrapper.find('[data-testid="log-card-stack"]')
+    const kindFilter = wrapper.find('[data-testid="log-kind-filter"]')
     const pagination = wrapper.find('[data-testid="log-pagination"]')
     const scrollbar = wrapper.find('[data-testid="log-top-scrollbar"]')
     const table = wrapper.find('[data-testid="log-table"]')
 
     expect(controls.exists()).toBe(true)
     expect(cardStack.exists()).toBe(true)
+    expect(kindFilter.exists()).toBe(true)
     expect(cardStack.findAllComponents({ name: 'Card' })).toHaveLength(2)
     expect(controls.text()).toContain('应用筛选')
     expect(controls.text()).toContain('重置')
     expect(pagination.exists()).toBe(true)
     expect(scrollbar.exists()).toBe(true)
     expect(table.exists()).toBe(true)
+    expect(table.text()).toContain('辅助')
     expect(isBefore(controls.element, pagination.element)).toBe(true)
     expect(isBefore(pagination.element, scrollbar.element)).toBe(true)
     expect(isBefore(scrollbar.element, table.element)).toBe(true)
