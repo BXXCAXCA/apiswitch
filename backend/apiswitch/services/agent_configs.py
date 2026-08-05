@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apiswitch.db.models import AgentConfig, UnifiedModel, UnifiedModelCandidate, UpstreamModel
+from apiswitch.routing.model_catalog import model_catalog_metadata
 
 MODEL_FIELDS = ("main_model_id", "opus_model_id", "sonnet_model_id", "haiku_model_id")
 _SCHEMA_URL = "https://json.schemastore.org/claude-code-settings.json"
@@ -67,12 +68,12 @@ def _openclaw_model(db: Session, model: UnifiedModel) -> dict[str, Any]:
     ).all()
     context = max((item.context_window or 0 for item in upstreams), default=0) or model.min_context_window or 32768
     max_tokens = max((item.max_output_tokens or 0 for item in upstreams), default=0) or min(8192, context)
-    inputs = {capability for item in upstreams for capability in (item.input_capabilities_json or [])}
+    metadata = model_catalog_metadata(db, model)
     return {
         "id": model.name,
         "name": model.name,
         "reasoning": False,
-        "input": [item for item in ("text", "image") if item == "text" or "vision" in inputs],
+        "input": [item for item in metadata["input_modalities"] if item in {"text", "image"}],
         "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
         "contextWindow": context,
         "maxTokens": max_tokens,
@@ -160,7 +161,13 @@ def agent_content(
         options["baseURL"] = _gateway_url(base_url, openai=True)
         options["apiKey"] = token or options.get("apiKey") or "{env:APISWITCH_API_KEY}"
         models = provider.get("models") if isinstance(provider.get("models"), dict) else {}
-        models[model.name] = {"name": model.name}
+        metadata = model_catalog_metadata(db, model)
+        models[model.name] = {
+            "name": model.name,
+            "attachment": "image" in metadata["input_modalities"],
+            "tool_call": "tools" in metadata["capabilities"],
+            "modalities": metadata["modalities"],
+        }
         provider.update({"npm": "@ai-sdk/openai-compatible", "name": "APISwitch", "options": options, "models": models})
         providers["apiswitch"] = provider
         document["model"] = f"apiswitch/{model.name}"

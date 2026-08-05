@@ -30,7 +30,7 @@ def test_generation_two_provider_model_route_and_protocols(client: TestClient):
     assert client.post("/v1beta/models/stable-model:generateContent", headers={"x-goog-api-key":token}, json={"contents": [{"parts": [{"text":"hello"}]}]}).status_code == 200
     gemini_models=client.get("/v1beta/models",params={"key":token,"pageSize":1000})
     assert gemini_models.status_code==200,gemini_models.text
-    assert gemini_models.json()=={"models":[{"name":"models/stable-model","baseModelId":"stable-model","version":"1","displayName":"stable-model","description":"APISwitch unified model","supportedGenerationMethods":["generateContent"]}]}
+    assert gemini_models.json()=={"models":[{"name":"models/stable-model","baseModelId":"stable-model","version":"1","displayName":"stable-model","description":"APISwitch unified model","supportedGenerationMethods":["generateContent"],"capabilities":["text"],"inputModalities":["text"],"outputModalities":["text"],"supportedFeatures":[]}]}
     gemini_model=client.get("/v1beta/models/stable-model",headers={"x-goog-api-key":token})
     assert gemini_model.status_code==200
     assert gemini_model.json()["name"]=="models/stable-model"

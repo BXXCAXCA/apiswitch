@@ -122,10 +122,25 @@ def test_agent_write_rejects_path_outside_current_user_profile(client,monkeypatc
 
 
 def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, monkeypatch):
+    provider = client.post(
+        "/api/admin/provider-instances",
+        json={"name": "agent-vision", "template_key": "openai", "base_url": "mock://agent-vision"},
+    ).json()
+    main = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "agent-text", "input_capabilities_json": ["text"], "output_capabilities_json": ["text", "tools"]},
+    ).json()
+    helper = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "agent-vision-helper", "input_capabilities_json": ["text", "vision"], "output_capabilities_json": ["text"]},
+    ).json()
     model = client.post(
         "/api/admin/unified-models",
         json={"name": "agent-all", "enabled_protocols": ["openai_chat", "openai_responses", "gemini_v1beta"]},
     ).json()
+    assert client.post(f"/api/admin/unified-models/{model['id']}/candidates", json={"upstream_model_id": main["id"]}).status_code == 201
+    assert client.post("/api/admin/auxiliary/models", json={"upstream_model_id": helper["id"], "capabilities": ["vision"]}).status_code == 201
+    assert client.post("/api/admin/auxiliary/workflows", json={"workflow_type": "vision_to_text", "input_capability": "vision", "output_capability": "text"}).status_code == 201
     monkeypatch.setattr("apiswitch.desktop.runtime_info", lambda: {"base_url": "http://127.0.0.1:8080"})
     targets = {
         "codex": tmp_path / "config.toml",
@@ -157,9 +172,14 @@ def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, mo
     opencode = json.loads(targets["opencode"].read_text(encoding="utf-8"))
     assert opencode["autoupdate"] is False and opencode["model"] == "apiswitch/agent-all"
     assert opencode["provider"]["apiswitch"]["options"]["apiKey"] == "ask_agent_secret"
+    opencode_model = opencode["provider"]["apiswitch"]["models"]["agent-all"]
+    assert opencode_model["attachment"] is True
+    assert opencode_model["tool_call"] is True
+    assert opencode_model["modalities"] == {"input": ["text", "image"], "output": ["text"]}
     openclaw = json.loads(targets["openclaw"].read_text(encoding="utf-8"))
     assert openclaw["gateway"]["port"] == 18789
     assert openclaw["agents"]["defaults"]["model"]["primary"] == "apiswitch/agent-all"
+    assert openclaw["models"]["providers"]["apiswitch"]["models"][-1]["input"] == ["text", "image"]
     hermes = yaml.safe_load(targets["hermes"].read_text(encoding="utf-8"))
     assert hermes["terminal"]["backend"] == "local" and hermes["model"]["provider"] == "custom"
     gemini = targets["gemini-cli"].read_text(encoding="utf-8")

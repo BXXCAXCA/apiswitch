@@ -112,7 +112,13 @@ def test_auxiliary_workflow_extends_declared_unified_input_capabilities(client: 
     advertised = next(item for item in models if item["id"] == unified["name"])
     assert "vision" in advertised["input_capabilities"]
     assert "text" in advertised["input_capabilities"]
+    assert "image-recognition" in advertised["capabilities"]
+    assert "image-recognition" in advertised["supported_features"]
+    assert advertised["input_modalities"] == ["text", "image"]
+    assert advertised["inputModalities"] == ["text", "image"]
+    assert advertised["supported_input_modalities"] == ["text", "image"]
     assert "image" in advertised["modalities"]["input"]
+    assert advertised["architecture"]["input_modalities"] == ["text", "image"]
 
     response = client.post("/v1/chat/completions", headers=headers, json=_vision_request(unified["name"]))
     assert response.status_code == 200, response.text

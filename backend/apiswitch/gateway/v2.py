@@ -17,8 +17,9 @@ from apiswitch.db.models import ApiToken, ApiTokenUnifiedModel, BatchJob, MediaJ
 from apiswitch.db.session import SessionLocal
 from apiswitch.config import settings
 from apiswitch.protocols.canonical import CanonicalEvent, CanonicalRequest, CanonicalResponse, ProtocolError, from_anthropic, from_gemini, from_openai_chat, from_openai_responses, from_terminal, reasoning_signature, response_events, to_anthropic_response, to_gemini_response, to_openai_response, to_openai_responses_usage
-from apiswitch.routing.engine import effective_unified_capabilities, structured_error
+from apiswitch.routing.engine import structured_error
 from apiswitch.routing.executor import execute_request
+from apiswitch.routing.model_catalog import model_catalog_metadata
 
 router = APIRouter(tags=["Gateway"])
 
@@ -70,34 +71,19 @@ async def list_models(db:Session=Depends(get_db),token:ApiToken=Depends(require_
     rows=[row for row in _callable_unified_models(db,token) if {"openai_chat","openai_responses"}&set(row.enabled_protocols_json or [])]
     data=[]
     for row in rows:
-        capabilities=effective_unified_capabilities(db,row)
-        input_modalities=[item for item in ("text","image","audio","file") if item in {
-            "text" if "text" in capabilities["input"] else "",
-            "image" if "vision" in capabilities["input"] else "",
-            "audio" if "audio" in capabilities["input"] else "",
-            "file" if "files" in capabilities["input"] else "",
-        }]
-        output_modalities=[item for item in ("text","image","audio") if item in {
-            "text" if "text" in capabilities["output"] else "",
-            "image" if "images" in capabilities["output"] else "",
-            "audio" if "audio" in capabilities["output"] else "",
-        }]
         data.append({
             "id":row.name,
+            "name":row.name,
             "object":"model",
             "created":int(row.created_at.timestamp()),
             "owned_by":"apiswitch",
-            "capabilities":sorted(set(capabilities["input"]+capabilities["output"])),
-            "input_capabilities":capabilities["input"],
-            "output_capabilities":capabilities["output"],
-            "input_modalities":input_modalities,
-            "output_modalities":output_modalities,
-            "modalities":{"input":input_modalities,"output":output_modalities},
+            **model_catalog_metadata(db,row),
         })
     return {"object":"list","data":data}
 
 
-def _gemini_model_resource(row:UnifiedModel)->dict[str,Any]:
+def _gemini_model_resource(db:Session,row:UnifiedModel)->dict[str,Any]:
+    metadata=model_catalog_metadata(db,row)
     return {
         "name":"models/"+row.name,
         "baseModelId":row.name,
@@ -105,6 +91,10 @@ def _gemini_model_resource(row:UnifiedModel)->dict[str,Any]:
         "displayName":row.name,
         "description":row.description or "APISwitch unified model",
         "supportedGenerationMethods":["generateContent"],
+        "capabilities":metadata["capabilities"],
+        "inputModalities":metadata["inputModalities"],
+        "outputModalities":metadata["outputModalities"],
+        "supportedFeatures":metadata["supported_features"],
     }
 
 
@@ -124,7 +114,7 @@ async def list_gemini_models(
     except ValueError as exc:raise HTTPException(400,detail=structured_error("validation_error","pageToken 无效","model_list")) from exc
     if offset<0:raise HTTPException(400,detail=structured_error("validation_error","pageToken 无效","model_list"))
     rows=_callable_gemini_models(db,token);page=rows[offset:offset+page_size]
-    result={"models":[_gemini_model_resource(row) for row in page]}
+    result={"models":[_gemini_model_resource(db,row) for row in page]}
     if offset+len(page)<len(rows):result["nextPageToken"]=str(offset+len(page))
     return result
 
@@ -133,7 +123,7 @@ async def list_gemini_models(
 async def get_gemini_model(model:str,db:Session=Depends(get_db),token:ApiToken=Depends(require_gateway_token))->dict[str,Any]:
     row=next((item for item in _callable_gemini_models(db,token) if item.name==model),None)
     if row is None:raise HTTPException(404,detail=structured_error("model_not_found","统一模型不存在或未启用 Gemini v1beta","model_list",details={"model":model}))
-    return _gemini_model_resource(row)
+    return _gemini_model_resource(db,row)
 
 
 def parse_ingress(protocol: str, payload: dict[str, Any], model_override: str | None = None, *, stream_override: bool | None = None) -> CanonicalRequest:

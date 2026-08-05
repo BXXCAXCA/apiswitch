@@ -101,7 +101,7 @@ Claude Code 所选模型必须启用 Anthropic Messages；Langcli 所选模型�
 
 网关端点范围见 `05-protocol-routing.md`。所有网关请求：
 
-- `GET /v1/models` 使用 OpenAI 模型目录结构返回当前可调用的统一模型，不暴露上游模型或供应商凭据；扩展字段 `input_capabilities`、`output_capabilities`、`input_modalities`、`output_modalities` 和 `modalities` 描述候选与辅助工作流共同提供的有效能力。
+- `GET /v1/models` 使用 OpenAI 模型目录结构返回当前可调用的统一模型，不暴露上游模型或供应商凭据；扩展字段 `input_capabilities`、`output_capabilities`、`input_modalities`、`output_modalities` 和 `modalities` 描述候选与辅助工作流共同提供的有效能力。为避免客户端在发送前丢弃附件，还同步返回 OpenClaw/OpenCode 使用的 `architecture`、`supported_*_modalities`、`supported_features`，以及 Cherry Studio 使用的 `inputModalities`、`outputModalities` 和 `image-recognition` 能力别名。Gemini 模型目录返回等价的驼峰字段。
 - 使用统一模型名称。
 - 要求 `Authorization: Bearer <APISWITCH_TOKEN>`。
 - 产生统一请求 ID。
