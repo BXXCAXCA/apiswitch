@@ -83,7 +83,12 @@ def run_smoke_test(report_path: Path) -> int:
         )
         worker.start()
         try:
-            _wait_for_server(base_url)
+            # A one-file PyInstaller executable can spend considerably longer
+            # extracting and warming imports on a cold GitHub Actions runner
+            # than an installed/local build. Keep the interactive desktop's
+            # 15-second default while giving packaged diagnostics enough time
+            # to distinguish a slow cold start from a real startup failure.
+            _wait_for_server(base_url, timeout_seconds=60)
         except RuntimeError as exc:
             if startup_error:
                 raise RuntimeError(
