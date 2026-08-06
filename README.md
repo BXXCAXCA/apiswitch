@@ -6,12 +6,12 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 
 ## 当前实现状态
 
-- 十二个管理页面、Canonical 协议内核、全部确认网关入口、Combo 路由、三种辅助模式、Token、日志、价格、预算、Agent 和 WebDAV 已接入新版数据结构。
+- 十个主导航管理页面、Canonical 协议内核、全部确认网关入口、Combo 路由、三种辅助模式、Token、日志、价格、预算、Agent 和 WebDAV 已接入新版数据结构。
 - Windows 桌面端使用 `%USERPROFILE%\.apiswitch`，支持单实例唤醒、托盘、后台启动、自启动、8080 冲突换端口和安全退出。
 - 供应商模板中的真实云服务均明确标记为“未验证”或“兼容模式”；自动化验收只使用 Mock、模拟 HTTP 上游和固定协议样例。
-- 前端十二个管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
+- 前端管理视图按路由懒加载，Vite 将 Vue、Naive UI、KaTeX、图标和其他依赖拆分为独立 chunk。
 - GitHub Actions 自动执行 Windows 后端测试与 Ruff、Ubuntu 前端测试与生产构建，以及 Windows PyInstaller 单文件打包、SHA-256 记录、产物上传和 GitHub Release 发布。
-- 当前发布版本为 [`v0.1.12`](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.12)：支持聚合 OpenAI-Compatible 上游 SSE；遇到 `choices: null` 且确认零输出时，按指数退避重试并自动切换到流式上游，兼容 ModelScope 上的 DeepSeek-V4-Flash-0731，同时完整保留正文、思考内容、工具调用和 Token 用量。
+- 当前源码版本为 `v0.1.14`：`v0.1.13` 将视觉辅助与模型能力声明统一为协议无关实现，`v0.1.14` 整理主导航、客户端管理和网关地址复制功能。推送 `main` 后，GitHub Actions 会自动构建并发布同版本安装包；发布包见 [Releases](https://github.com/BXXCAXCA/apiswitch/releases)。
 - 唯一确认延期项是“辅助步骤成本进入预算上限与执行动作”；逐步骤日志、Token、成本、延迟和用量聚合已经实现。
 
 ## 最终产品流程
@@ -29,13 +29,11 @@ APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关�
 3. 上游模型
 4. 统一模型
 5. 辅助模型
-6. API Token
-7. 路由状态
-8. 调用日志
-9. 价格与用量
-10. 预算控制
-11. Agent 配置
-12. 系统设置
+6. 预算控制
+7. 调用日志
+8. 价格与用量
+9. 客户端管理
+10. Agent 配置
 
 ## 技术栈
 

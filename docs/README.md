@@ -9,7 +9,7 @@
 ## 阅读顺序
 
 1. [产品需求](01-product-requirements.md)：产品边界、菜单、核心对象与完成范围。
-2. [界面与使用流程](02-information-architecture.md)：十二个页面的职责和用户操作路径。
+2. [界面与使用流程](02-information-architecture.md)：十个主导航页面及高级设置的职责和用户操作路径。
 3. [系统架构](03-system-architecture.md)：模块边界、运行时流程和错误原则。
 4. [数据模型](04-data-model.md)：全新数据库结构和旧库覆盖策略。
 5. [协议、路由与辅助模型](05-protocol-routing.md)：统一协议内核、Combo 和辅助调用链。
@@ -17,9 +17,9 @@
 7. [开发计划与验收](07-development-and-acceptance.md)：全量交付顺序、质量门槛和完成定义。
 8. [API 契约](08-api-contracts.md)：目标管理 API、网关 API 和结构化错误。
 9. [续开发交接包](CONTINUE_IN_GPT.md)：GPT 网页版与其他开发助手的当前入口。
-10. [全流程开发任务提示词](FULL_DEVELOPMENT_PROMPT.md)：历史 Codex 提示词，仅作参考。
-11. [ChatGPT 开发交接文档](APISwitch_ChatGPT_Development_Handoff.md)：2026-07-23 的历史快照；不要作为当前状态依据。
-12. `APISwitch_ChatGPT_Development_Handoff.docx`：与历史快照对应的 DOCX 副本；如需上传文档，请优先使用 `CONTINUE_IN_GPT.md`。
+10. [历史资料归档](archive/README.md)：旧提示词和阶段性交接材料，仅供追溯。
+11. [全流程开发任务提示词（历史）](archive/FULL_DEVELOPMENT_PROMPT.md)。
+12. [ChatGPT 开发交接文档（历史）](archive/APISwitch_ChatGPT_Development_Handoff.md) 与 [DOCX 副本](archive/APISwitch_ChatGPT_Development_Handoff.docx)。
 
 ## 决策优先级
 

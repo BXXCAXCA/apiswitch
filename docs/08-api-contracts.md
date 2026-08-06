@@ -56,7 +56,7 @@
 
 `plan` 为 dry-run，返回能力差距、选中步骤、模型和失败原因。
 
-## 6. Token、路由、日志、用量和预算
+## 6. Token、内部路由诊断、日志、用量和预算
 
 - `/api/admin/tokens`
 - `/api/admin/router/status`
@@ -65,6 +65,8 @@
 - `/api/admin/accounting/pricing`
 - `/api/admin/accounting/usage`
 - `/api/admin/budgets`
+
+`/api/admin/router/*` 是内部诊断接口，供自动化测试和故障排查使用；前端不再提供“路由状态”菜单或独立页面。
 
 转换测试默认使用 Mock，不得无提示调用真实供应商。
 

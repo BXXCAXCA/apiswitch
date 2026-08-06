@@ -1,7 +1,13 @@
 <template>
   <n-space vertical size="large">
-    <n-h1>API Token</n-h1>
-    <n-alert type="info">这是客户端访问网关的 Token，与供应商 API Key 完全分离。必须明确选择可用统一模型；未选择时模型不可见且不可调用。明文只在创建成功后显示一次。</n-alert>
+    <n-h1>客户端管理</n-h1>
+    <n-alert type="info">这里管理客户端访问网关所需的 API Token。它与供应商 API Key 完全分离。必须明确选择可用统一模型；未选择时模型不可见且不可调用。明文只在创建成功后显示一次。</n-alert>
+    <n-card title="网关地址" size="small">
+      <n-space align="center">
+        <n-code :code="gatewayUrl || '正在读取当前网关地址…'" word-wrap />
+        <n-button data-testid="copy-gateway-url" type="primary" secondary :disabled="!gatewayUrl" @click="copyGatewayUrl">复制网关地址</n-button>
+      </n-space>
+    </n-card>
     <n-alert v-if="createdToken" type="success" closable @close="createdToken=''" title="请立即复制，关闭后无法找回">
       <n-space vertical>
         <n-code :code="createdToken" word-wrap/>
@@ -30,16 +36,17 @@ import { NAlert,NButton,NCard,NCode,NDataTable,NDatePicker,NEmpty,NForm,NFormIte
 import { deleteJson,getJson,patchJson,postJson } from '../api/client'
 import { copyText } from '../clipboard'
 import { chinaDatePickerValueToIso, formatChinaDateTime, toChinaDatePickerValue } from '../dateTime'
-const message=useMessage();const items=ref<any[]>([]);const budgets=ref<any[]>([]);const unifiedModels=ref<any[]>([]);const loading=ref(false);const saving=ref(false);const createdToken=ref('');const editingId=ref<number|null>(null)
+const message=useMessage();const items=ref<any[]>([]);const budgets=ref<any[]>([]);const unifiedModels=ref<any[]>([]);const gatewayUrl=ref('');const loading=ref(false);const saving=ref(false);const createdToken=ref('');const editingId=ref<number|null>(null)
 const form=reactive<any>({name:'',scopes:['gateway:invoke'],unified_model_ids:[],expires_at:null,budget_id:null,enabled:true})
 const scopeOptions=[{label:'调用网关 gateway:invoke',value:'gateway:invoke'},{label:'管理访问 admin:access',value:'admin:access'}]
 const budgetOptions=computed(()=>budgets.value.map(x=>({label:`${x.name} (${x.scope})`,value:x.id})))
 const unifiedModelOptions=computed(()=>unifiedModels.value.map(x=>({label:x.name,value:x.id})))
-async function load(){loading.value=true;try{[items.value,budgets.value,unifiedModels.value]=await Promise.all([getJson('/api/admin/tokens'),getJson('/api/admin/budgets'),getJson('/api/admin/unified-models')]) as any}finally{loading.value=false}}
+async function load(){loading.value=true;try{const [tokens,budgetRows,models,runtime]:any=await Promise.all([getJson('/api/admin/tokens'),getJson('/api/admin/budgets'),getJson('/api/admin/unified-models'),getJson('/api/admin/runtime')]);items.value=tokens;budgets.value=budgetRows;unifiedModels.value=models;gatewayUrl.value=String(runtime?.base_url||'')}finally{loading.value=false}}
 function reset(){editingId.value=null;Object.assign(form,{name:'',scopes:['gateway:invoke'],unified_model_ids:[],expires_at:null,budget_id:null,enabled:true})}
 function edit(row:any){editingId.value=row.id;Object.assign(form,{name:row.name,scopes:[...(row.scopes||[])],unified_model_ids:[...(row.unified_model_ids||[])],expires_at:toChinaDatePickerValue(row.expires_at),budget_id:row.budget_id||null,enabled:row.enabled})}
 function payload(){return {name:form.name.trim(),scopes:form.scopes,unified_model_ids:[...form.unified_model_ids],expires_at:form.expires_at?chinaDatePickerValueToIso(form.expires_at):null,budget_id:form.budget_id,enabled:form.enabled}}
 async function copyCreatedToken(){try{await copyText(createdToken.value);message.success('Token 已复制到剪贴板')}catch(error){message.error(String(error))}}
+async function copyGatewayUrl(){try{await copyText(gatewayUrl.value);message.success('网关地址已复制到剪贴板')}catch(error){message.error(String(error))}}
 async function save(){if(!form.name.trim()||!form.scopes.length)return message.warning('请填写名称并至少选择一个 Scope');saving.value=true;try{if(editingId.value)await patchJson(`/api/admin/tokens/${editingId.value}`,payload());else{const result:any=await postJson('/api/admin/tokens',payload());createdToken.value=result.token}reset();await load()}catch(error){message.error(String(error))}finally{saving.value=false}}
 async function toggle(row:any){await patchJson(`/api/admin/tokens/${row.id}`,{enabled:!row.enabled});await load()}
 async function rotate(row:any){if(!window.confirm(`重置“${row.name}”的 Token？旧 Token 将立即失效。`))return;try{const result:any=await postJson(`/api/admin/tokens/${row.id}/rotate`,{});createdToken.value=result.token;await load();message.success('Token 已重置，请立即复制并更新所有客户端')}catch(error){message.error(String(error))}}

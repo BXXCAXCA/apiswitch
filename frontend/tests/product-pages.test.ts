@@ -11,7 +11,6 @@ import BudgetsView from '../src/views/BudgetsView.vue'
 import LogsView from '../src/views/LogsView.vue'
 import AgentsV2View from '../src/views/AgentsV2View.vue'
 import SystemSettingsV2View from '../src/views/SystemSettingsV2View.vue'
-import RouterStatusView from '../src/views/RouterStatusView.vue'
 import CapabilityCheckboxGroup from '../src/components/CapabilityCheckboxGroup.vue'
 import { inputCapabilityOptions } from '../src/modelCapabilities'
 import { getJson, patchJson, postJson } from '../src/api/client'
@@ -260,18 +259,6 @@ describe('generation two product pages', () => {
     wrapper.unmount()
   })
 
-  it('syncs the dry-run model with the selected unified model', async () => {
-    const getMock = vi.mocked(getJson)
-    getMock.mockImplementation(async (url: string) => url === '/api/admin/router/status'
-      ? { models: [{ id: 7, name: 'selected-model', candidates: [] }], matrix: {}, health: [], circuit_breakers: [], quotas: [] } as any
-      : [] as any)
-    const wrapper = mountWithMessage(RouterStatusView)
-    await flushPromises()
-    expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toContain('"model": "selected-model"')
-    wrapper.unmount()
-    getMock.mockImplementation(async () => [] as any)
-  })
-
   it('shows complete upstream model names in the unified candidate selector', async () => {
     const getMock = vi.mocked(getJson)
     getMock.mockImplementation(async (url: string) => {
@@ -413,6 +400,26 @@ describe('generation two product pages', () => {
     const clientFilter: any = wrapper.findComponent('[data-testid="log-client-filter"]')
     expect(clientFilter.props('placeholder')).toBe('客户端名称（可选）')
     expect(clientFilter.props('options')).toEqual([{ label: '桌面客户端', value: 7 }])
+    wrapper.unmount()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
+  it('shows and copies the current gateway address from client management', async () => {
+    const gatewayUrl = 'http://127.0.0.1:8123'
+    const writeText = vi.fn(async () => undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const getMock = vi.mocked(getJson)
+    getMock.mockImplementation(async (url: string) => url === '/api/admin/runtime'
+      ? { base_url: gatewayUrl } as any
+      : [] as any)
+
+    const wrapper = mountWithMessage(TokensView)
+    await flushPromises()
+    expect(wrapper.text()).toContain(gatewayUrl)
+    await wrapper.find('[data-testid="copy-gateway-url"]').trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(gatewayUrl)
+
     wrapper.unmount()
     getMock.mockImplementation(async () => [] as any)
   })

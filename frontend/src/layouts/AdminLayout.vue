@@ -26,16 +26,12 @@
 import { h, ref } from 'vue'
 import { NButton, NLayout, NLayoutContent, NLayoutSider, NMenu } from 'naive-ui'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { productNavigation } from '../navigation'
 
 const route = useRoute()
 const router = useRouter()
 const collapsed = ref(localStorage.getItem('apiswitch.sidebar.collapsed') === '1')
-const entries = [
-  ['仪表盘', '/dashboard'], ['供应商', '/providers'], ['上游模型', '/upstream-models'], ['统一模型', '/unified-models'],
-  ['辅助模型', '/auxiliary-models'], ['API Token', '/tokens'], ['路由状态', '/router-status'], ['调用日志', '/logs'],
-  ['价格与用量', '/accounting'], ['预算控制', '/budgets'], ['Agent 配置', '/agents'], ['系统设置', '/settings']
-]
-const menuOptions = entries.map(([label, path]) => ({ label: () => h(RouterLink, { to: path }, { default: () => label }), key: path }))
+const menuOptions = productNavigation.map(({ label, path }) => ({ label: () => h(RouterLink, { to: path }, { default: () => label }), key: path }))
 function navigate(path: string) { router.push(path) }
 function saveCollapsed(value: boolean) { localStorage.setItem('apiswitch.sidebar.collapsed', value ? '1' : '0') }
 </script>

@@ -1,6 +1,6 @@
 # 全流程开发任务提示词（历史参考）
 
-> 本提示词面向旧的全流程 Codex 任务，部分版本、分支与验证状态已过期。请优先使用 [CONTINUE_IN_GPT.md](CONTINUE_IN_GPT.md) 中面向 GPT 网页版的当前续开发提示词。
+> 本提示词面向旧的全流程 Codex 任务，部分版本、分支与验证状态已过期。请优先使用 [CONTINUE_IN_GPT.md](../CONTINUE_IN_GPT.md) 中面向 GPT 网页版的当前续开发提示词。
 
 将下面完整内容复制到一个新的 Codex 任务中即可开始全流程开发。
 
@@ -24,15 +24,15 @@
 总目标：完成新版 APISwitch 的全部重构并交付 Windows 单文件 dist\APISwitch.exe。除“辅助调用链每一步的独立 Token、成本、延迟和预算归集”明确延期外，文档中的其他功能必须全部完成。本任务不得在只完成某个阶段时宣称完成。
 
 必须实现：
-1. 最终 12 个菜单：仪表盘、供应商、上游模型、统一模型、辅助模型、API Token、路由状态、调用日志、价格与用量、预算控制、Agent 配置、系统设置。
+1. 最终 10 个主导航菜单：仪表盘、供应商、上游模型、统一模型、辅助模型、预算控制、调用日志、价格与用量、客户端管理、Agent 配置。
 2. 供应商采用模板目录 + 独立实例。同一模板可添加多个不同 API Key，显示为多个供应商实例；手动供应商可选择 OpenAI-Compatible、Anthropic Messages、Gemini 或自定义协议并配置 Base URL、密钥和自定义头。
 3. 删除新业务路径中的 Connection/Node 层级。上游模型直接属于供应商实例，可远端拉取或手工添加；同步时保留被引用但远端消失的模型并标记不可用。
 4. 统一模型直接绑定上游模型，支持多个候选、优先级、权重、启停、原有全部 Combo 策略，以及同时开启多个对外协议。
 5. 建立统一 Canonical Request/Response/Event 协议内核。OpenAI Chat、Responses、Anthropic Messages、Gemini v1beta、Embeddings、Files、Images、Audio、Moderations、Rerank、Search、Batches、WebSocket、Video、Music 全部经过同一统一模型、能力、路由、日志和错误管线。
 6. 协议无法可靠转换或能力不兼容时返回明确结构化错误，不静默丢字段，不自动换其他统一模型。
 7. 辅助模型支持 disabled、per-unified-model、global-pool 三模式，默认 global-pool。按“供应商 → 上游模型 → 辅助能力/工作流”配置；同一模型可同时作为主候选和辅助模型。实现视觉转文本、文件提取、上下文压缩、工具规划、音频转写、结构化修复和终端能力等可排序工作流。步骤失败立即返回失败阶段，不调用未配置模型。本批只需基础辅助链日志，不做延期的分步成本归集。
-8. 路由状态同时显示协议映射矩阵、Combo 候选与原因、健康/熔断/额度，以及协议转换 dry-run 测试台；展示入口、Canonical、上游请求、上游响应和最终响应。
-9. API Token 放在辅助模型之后，始终保护网关端点。供应商 API Key 与客户端 Token 严格区分。
+8. 客户端管理始终保护网关端点，显示并允许复制当前网关地址。供应商 API Key 与客户端 Token 严格区分。
+9. 调用日志、价格与用量和预算控制提供路由结果、Token、成本、延迟、聚合和预算动作。
 10. Claude Code 配置分别选择主模型、Opus、Sonnet、Haiku，支持预览、备份、原子写入和恢复。Base URL 使用当前网关地址；端口变化自动备份并更新所有已启用配置。保留 Codex、Gemini CLI、OpenCode 扩展入口。
 11. 系统设置整合运行、端口、数据目录、开机自启动、上传限制、数据库备份恢复、密钥、系统信息和 WebDAV。WebDAV 使用独立备份密码，对数据库、API Key、Token、日志、文件、设置和主密钥进行全量加密归档；错误密码或损坏不得修改本地数据。
 12. Windows 桌面端数据目录为 %USERPROFILE%\.apiswitch。优先监听 127.0.0.1:8080，占用时自动换端口并写 runtime.json。实现当前用户单实例，重复启动唤醒窗口；保留托盘、后台启动、自启动和优雅退出。

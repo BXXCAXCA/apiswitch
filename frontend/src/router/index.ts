@@ -7,7 +7,6 @@ const ModelDiscoveryView = () => import('../views/ModelDiscoveryView.vue')
 const UnifiedModelsView = () => import('../views/UnifiedModelsView.vue')
 const AuxiliaryModelsView = () => import('../views/AuxiliaryModelsView.vue')
 const TokensView = () => import('../views/TokensView.vue')
-const RouterStatusView = () => import('../views/RouterStatusView.vue')
 const LogsView = () => import('../views/LogsView.vue')
 const AccountingV2View = () => import('../views/AccountingV2View.vue')
 const BudgetsView = () => import('../views/BudgetsView.vue')
@@ -21,7 +20,6 @@ export const router = createRouter({
     { path: 'providers', component: ProvidersView }, { path: 'upstream-models', component: ModelDiscoveryView },
     { path: 'unified-models', component: UnifiedModelsView }, { path: 'auxiliary-models', component: AuxiliaryModelsView },
     { path: 'tokens', component: TokensView },
-    { path: 'router-status', component: RouterStatusView },
     { path: 'logs', component: LogsView },
     { path: 'accounting', component: AccountingV2View },
     { path: 'budgets', component: BudgetsView },
