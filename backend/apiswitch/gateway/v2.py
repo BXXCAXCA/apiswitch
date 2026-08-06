@@ -281,6 +281,18 @@ def render_sse(request: CanonicalRequest, events: list[CanonicalEvent]) -> list[
     raise ProtocolError("protocol_conversion_unsupported",f"{request.inbound_protocol} 不支持事件流转换","protocol_conversion")
 
 
+def _protocol_error_status(exc:ProtocolError)->int:
+    """Expose transient upstream failures without client/model special cases."""
+    details=exc.details if isinstance(exc.details,dict) else {};cause=str(details.get("cause") or exc.error_type)
+    try:upstream_status=int(details.get("status_code") or 0)
+    except (TypeError,ValueError):upstream_status=0
+    if upstream_status==429:return 429
+    if cause=="provider_timeout":return 504
+    if cause=="provider_unavailable":return 503
+    if cause=="upstream_http_error" and upstream_status>=500:return 502
+    return 400
+
+
 async def _execute(
     protocol: str,
     payload: dict[str, Any],
@@ -301,7 +313,7 @@ async def _execute(
             return StreamingResponse(iter(render_sse(canonical,events)),media_type="text/event-stream")
         return result
     except ProtocolError as exc:
-        return JSONResponse(status_code=400,content=structured_error(exc.error_type,str(exc),exc.stage,details=exc.details))
+        return JSONResponse(status_code=_protocol_error_status(exc),content=structured_error(exc.error_type,str(exc),exc.stage,details=exc.details))
 
 
 @router.post("/v1/chat/completions")

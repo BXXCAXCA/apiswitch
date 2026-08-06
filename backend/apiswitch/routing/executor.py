@@ -6,8 +6,10 @@ can use ``httpx.MockTransport`` without contacting a real provider.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
+import threading
 import time
 import uuid
 from types import SimpleNamespace
@@ -31,6 +33,12 @@ from apiswitch.services.budget_enforcement import accumulate_budget_spend, budge
 HTTP_TRANSPORT: httpx.AsyncBaseTransport | None = None
 EMPTY_COMPLETION_MAX_ATTEMPTS = 4
 EMPTY_COMPLETION_RETRY_BASE_SECONDS = 0.5
+AUXILIARY_CACHE_TTL_SECONDS = 60.0
+AUXILIARY_CACHE_MAX_ENTRIES = 256
+
+_auxiliary_cache:dict[str,tuple[float,CanonicalResponse,str]]={}
+_auxiliary_inflight:dict[tuple[int,str],tuple[asyncio.Task[CanonicalResponse],str]]={}
+_auxiliary_runtime_lock=threading.Lock()
 
 
 def _canonical_tools(request:CanonicalRequest)->list[dict[str,Any]]:
@@ -96,7 +104,10 @@ def _canonical_message_parts(request:CanonicalRequest,message:dict[str,Any])->li
             for item in content:
                 if not isinstance(item,dict):raise ProtocolError("protocol_conversion_unsupported","消息内容项必须是对象","protocol_conversion")
                 if item.get("type") in {"text","input_text","output_text"}:parts.append({"type":"text","text":item.get("text","")})
-                elif item.get("type") in {"input_image","image_url"}:parts.append({"type":"image","image_url":item.get("image_url") or item.get("url")})
+                elif item.get("type") in {"input_image","image_url"}:
+                    image_url=item.get("image_url") or item.get("url")
+                    if isinstance(image_url,str):image_url={"url":image_url}
+                    parts.append({"type":"image","image_url":image_url})
                 elif item.get("type") in {"input_file","file"}:parts.append({"type":"file","file":item})
                 elif item.get("type")=="input_audio":parts.append({"type":"audio","audio":item.get("input_audio") or item})
                 else:raise ProtocolError("protocol_conversion_unsupported",f"{item.get('type','unknown')} 内容无法可靠跨协议转换","protocol_conversion")
@@ -113,13 +124,29 @@ def _canonical_message_parts(request:CanonicalRequest,message:dict[str,Any])->li
             kind=item.get("type")
             if kind=="text":parts.append({"type":"text","text":item.get("text","")})
             elif kind=="thinking":parts.append({"type":"reasoning","text":item.get("thinking","")})
+            elif kind=="image":
+                source=item.get("source") or {};source_type=source.get("type")
+                if source_type=="base64" and source.get("data"):
+                    media_type=source.get("media_type") or "image/jpeg"
+                    parts.append({"type":"image","image_url":{"url":f"data:{media_type};base64,{source['data']}"}})
+                elif source_type=="url" and source.get("url"):
+                    parts.append({"type":"image","image_url":{"url":source["url"]}})
+                else:raise ProtocolError("protocol_conversion_unsupported","Anthropic 图像来源无法可靠转换","protocol_conversion")
+            elif kind=="document":
+                source=item.get("source") or {};source_type=source.get("type")
+                if source_type=="base64" and source.get("data"):
+                    media_type=source.get("media_type") or "application/octet-stream"
+                    parts.append({"type":"file","file":{"type":"input_file","file_data":f"data:{media_type};base64,{source['data']}"}})
+                elif source_type=="url" and source.get("url"):
+                    parts.append({"type":"file","file":{"type":"input_file","file_url":source["url"]}})
+                else:raise ProtocolError("protocol_conversion_unsupported","Anthropic 文档来源无法可靠转换","protocol_conversion")
             elif kind=="tool_use":parts.append({"type":"tool_call","id":item.get("id"),"name":item.get("name"),"arguments":item.get("input") or {}})
             elif kind=="tool_result":parts.append({"type":"tool_result","tool_call_id":item.get("tool_use_id"),"content":item.get("content","")})
             else:raise ProtocolError("protocol_conversion_unsupported",f"Anthropic {kind or 'unknown'} 内容无法可靠跨协议转换","protocol_conversion")
         return parts
     if request.inbound_protocol=="gemini_v1beta":
-        parts=[]
-        for item in message.get("content",[]):
+        parts=[];content=message.get("content",[]);content=[{"text":content}] if isinstance(content,str) else content
+        for item in content:
             if not isinstance(item,dict):raise ProtocolError("protocol_conversion_unsupported","Gemini part 必须是对象","protocol_conversion")
             if "text" in item and item.get("thought"):parts.append({"type":"reasoning","text":item.get("text","")})
             elif "text" in item:parts.append({"type":"text","text":item.get("text","")})
@@ -127,6 +154,16 @@ def _canonical_message_parts(request:CanonicalRequest,message:dict[str,Any])->li
                 call=item["functionCall"];parts.append({"type":"tool_call","id":None,"name":call.get("name"),"arguments":call.get("args") or {}})
             elif isinstance(item.get("functionResponse"),dict):
                 result=item["functionResponse"];parts.append({"type":"tool_result","tool_call_id":result.get("name"),"name":result.get("name"),"content":result.get("response") or {}})
+            elif isinstance(item.get("inlineData") or item.get("inline_data"),dict):
+                media=item.get("inlineData") or item.get("inline_data") or {};mime=str(media.get("mimeType") or media.get("mime_type") or "application/octet-stream");data=media.get("data")
+                if not data:raise ProtocolError("protocol_conversion_unsupported","Gemini inlineData 缺少数据","protocol_conversion")
+                if mime.startswith("image/"):parts.append({"type":"image","image_url":{"url":f"data:{mime};base64,{data}"}})
+                elif mime.startswith("audio/"):parts.append({"type":"audio","audio":{"data":data,"format":mime.split("/",1)[-1]}})
+                else:parts.append({"type":"file","file":{"type":"input_file","file_data":f"data:{mime};base64,{data}"}})
+            elif isinstance(item.get("fileData") or item.get("file_data"),dict):
+                media=item.get("fileData") or item.get("file_data") or {};uri=media.get("fileUri") or media.get("file_uri")
+                if not uri:raise ProtocolError("protocol_conversion_unsupported","Gemini fileData 缺少 URI","protocol_conversion")
+                parts.append({"type":"file","file":{"type":"input_file","file_url":uri}})
             else:raise ProtocolError("protocol_conversion_unsupported","Gemini 多媒体 part 无法可靠跨协议转换","protocol_conversion")
         return parts
     raise ProtocolError("protocol_conversion_unsupported","未知入口消息格式","protocol_conversion")
@@ -192,6 +229,18 @@ def _upstream_http_error_details(response:httpx.Response,provider_id:int)->dict[
     return details
 
 
+def _split_data_uri(value:Any)->tuple[str,str]|None:
+    if not isinstance(value,str):return None
+    matched=re.fullmatch(r"data:([^;,]+);base64,(.+)",value,flags=re.DOTALL)
+    return (matched.group(1),matched.group(2)) if matched else None
+
+
+def _canonical_media_url(part:dict[str,Any])->str:
+    value=part.get("image_url") or part.get("url")
+    if isinstance(value,dict):value=value.get("url")
+    return str(value or "")
+
+
 def _messages_for_anthropic(request:CanonicalRequest)->list[dict[str,Any]]:
     if request.inbound_protocol=="anthropic_messages":
         output=[]
@@ -214,15 +263,27 @@ def _messages_for_anthropic(request:CanonicalRequest)->list[dict[str,Any]]:
         for part in _canonical_message_parts(request,message):
             if part["type"]=="text":blocks.append({"type":"text","text":part.get("text","")})
             elif part["type"]=="reasoning":blocks.append({"type":"thinking","thinking":part.get("text","")})
+            elif part["type"]=="image":
+                url=_canonical_media_url(part);inline=_split_data_uri(url)
+                if inline:blocks.append({"type":"image","source":{"type":"base64","media_type":inline[0],"data":inline[1]}})
+                elif url:blocks.append({"type":"image","source":{"type":"url","url":url}})
+                else:raise ProtocolError("protocol_conversion_unsupported","图像缺少可转换的数据或 URL","protocol_conversion")
+            elif part["type"]=="file":
+                file=part.get("file") or {};file_data=file.get("file_data");file_url=file.get("file_url");inline=_split_data_uri(file_data)
+                if inline:blocks.append({"type":"document","source":{"type":"base64","media_type":inline[0],"data":inline[1]}})
+                elif file_url:blocks.append({"type":"document","source":{"type":"url","url":file_url}})
+                else:raise ProtocolError("protocol_conversion_unsupported","文件缺少可转换的数据或 URL","protocol_conversion")
+            elif part["type"]=="audio":raise ProtocolError("protocol_conversion_unsupported","Anthropic Messages 无法可靠表达音频块","protocol_conversion")
             elif part["type"]=="tool_call":blocks.append({"type":"tool_use","id":part.get("id") or f"toolu_{len(output)}","name":part.get("name"),"input":part.get("arguments") or {}})
-            else:blocks.append({"type":"tool_result","tool_use_id":part.get("tool_call_id") or part.get("name"),"content":part.get("content","")})
+            elif part["type"]=="tool_result":blocks.append({"type":"tool_result","tool_use_id":part.get("tool_call_id") or part.get("name"),"content":part.get("content","")})
+            else:raise ProtocolError("protocol_conversion_unsupported",f"Anthropic 无法表达 {part['type']} 内容","protocol_conversion")
         if blocks:output.append({"role":role,"content":blocks})
     return output
 
 
 def _messages_for_gemini(request:CanonicalRequest)->list[dict[str,Any]]:
     if request.inbound_protocol=="gemini_v1beta":
-        return [{"role":"model" if message.get("role") in {"assistant","model"} else "user","parts":message.get("content",[])} for message in request.messages if isinstance(message,dict) and message.get("role")!="system"]
+        return [{"role":"model" if message.get("role") in {"assistant","model"} else "user","parts":[{"text":message.get("content","")}] if isinstance(message.get("content"),str) else message.get("content",[])} for message in request.messages if isinstance(message,dict) and message.get("role")!="system"]
     output=[];call_names:dict[str,str]={}
     for message in request.messages:
         if not isinstance(message,dict) or message.get("role")=="system":continue
@@ -230,14 +291,29 @@ def _messages_for_gemini(request:CanonicalRequest)->list[dict[str,Any]]:
         for part in _canonical_message_parts(request,message):
             if part["type"]=="text":parts.append({"text":part.get("text","")})
             elif part["type"]=="reasoning":parts.append({"text":part.get("text","") ,"thought":True})
+            elif part["type"]=="image":
+                url=_canonical_media_url(part);inline=_split_data_uri(url)
+                if inline:parts.append({"inlineData":{"mimeType":inline[0],"data":inline[1]}})
+                elif url:parts.append({"fileData":{"mimeType":"image/*","fileUri":url}})
+                else:raise ProtocolError("protocol_conversion_unsupported","图像缺少可转换的数据或 URL","protocol_conversion")
+            elif part["type"]=="file":
+                file=part.get("file") or {};inline=_split_data_uri(file.get("file_data"));file_url=file.get("file_url")
+                if inline:parts.append({"inlineData":{"mimeType":inline[0],"data":inline[1]}})
+                elif file_url:parts.append({"fileData":{"mimeType":"application/octet-stream","fileUri":file_url}})
+                else:raise ProtocolError("protocol_conversion_unsupported","文件缺少可转换的数据或 URL","protocol_conversion")
+            elif part["type"]=="audio":
+                audio=part.get("audio") or {};data=audio.get("data");audio_format=str(audio.get("format") or "wav")
+                if not data:raise ProtocolError("protocol_conversion_unsupported","音频缺少可转换的数据","protocol_conversion")
+                parts.append({"inlineData":{"mimeType":f"audio/{audio_format}","data":data}})
             elif part["type"]=="tool_call":
                 name=str(part.get("name") or "");parts.append({"functionCall":{"name":name,"args":part.get("arguments") or {}}})
                 if part.get("id"):call_names[str(part["id"])]=name
-            else:
+            elif part["type"]=="tool_result":
                 name=str(part.get("name") or call_names.get(str(part.get("tool_call_id")),""))
                 if not name:raise ProtocolError("protocol_conversion_unsupported","工具结果缺少可映射的函数名","protocol_conversion")
                 content=part.get("content");response=content if isinstance(content,dict) else {"result":content}
                 parts.append({"functionResponse":{"name":name,"response":response}})
+            else:raise ProtocolError("protocol_conversion_unsupported",f"Gemini 无法表达 {part['type']} 内容","protocol_conversion")
         if parts:output.append({"role":role,"parts":parts})
     return output
 
@@ -733,7 +809,7 @@ def _record_auxiliary_log(
     output_tokens=int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
     cost=(input_tokens*(upstream.input_price or 0)+output_tokens*(upstream.output_price or 0))/1_000_000
     step.update({"request_id":request_id,"parent_request_id":parent_request_id,"latency_ms":latency_ms,"input_tokens":input_tokens,"output_tokens":output_tokens,"estimated_cost":cost})
-    summary={key:step.get(key) for key in ("workflow_id","workflow_type","step_index","input","output","status","parent_request_id")}
+    summary={key:step.get(key) for key in ("workflow_id","workflow_type","step_index","attempt_index","input","output","status","parent_request_id","cache_status","shared_request_id")}
     db.add(RequestLog(
         request_id=request_id,request_kind="auxiliary",parent_request_id=parent_request_id,
         started_at=started,finished_at=utc_now(),inbound_protocol="auxiliary",
@@ -751,6 +827,69 @@ def _record_auxiliary_log(
         ))
 
 
+def _auxiliary_fingerprint(candidate:RouteCandidate,request:CanonicalRequest)->str:
+    protocol=candidate.provider.protocol_type
+    if protocol in {"openai","openai_compatible"}:payload=_openai_payload(request,candidate.upstream.model_id)
+    elif protocol=="anthropic_messages":payload=_anthropic_payload(request,candidate.upstream.model_id)
+    elif protocol=="gemini":payload=_gemini_payload(request)
+    else:payload=request.dump()
+    source={"provider_protocol":protocol,"upstream_model_id":candidate.upstream.id,"model":candidate.upstream.model_id,"request_type":request.request_type,"payload":payload}
+    encoded=json.dumps(source,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _clone_auxiliary_response(result:CanonicalResponse,*,include_usage:bool)->CanonicalResponse:
+    values=result.dump()
+    if not include_usage:values["usage"]={}
+    return CanonicalResponse(**values)
+
+
+def _clear_auxiliary_runtime_state()->None:
+    """Clear process-local auxiliary sharing state (used by isolation tests)."""
+    with _auxiliary_runtime_lock:
+        _auxiliary_cache.clear();_auxiliary_inflight.clear()
+
+
+async def _call_auxiliary_shared(
+    candidate:RouteCandidate,request:CanonicalRequest,*,source_request_id:str,require_text:bool,
+)->tuple[CanonicalResponse,dict[str,str]]:
+    """Coalesce identical helper calls and reuse only short-lived successes."""
+    fingerprint=_auxiliary_fingerprint(candidate,request);now=time.monotonic();loop=asyncio.get_running_loop();inflight_key=(id(loop),fingerprint)
+    with _auxiliary_runtime_lock:
+        expired=[key for key,(expires,_,_) in _auxiliary_cache.items() if expires<=now]
+        for key in expired:_auxiliary_cache.pop(key,None)
+        cached=_auxiliary_cache.get(fingerprint)
+        if cached:
+            return _clone_auxiliary_response(cached[1],include_usage=False),{"cache_status":"hit","shared_request_id":cached[2]}
+        shared=_auxiliary_inflight.get(inflight_key)
+        if shared:
+            task,shared_request_id=shared;cache_status="coalesced"
+        else:
+            async def invoke()->CanonicalResponse:
+                response=await _call_http(candidate,request)
+                if require_text and not _clean_auxiliary_text(str(response.get("text") or "")):
+                    raise ProtocolError("empty_auxiliary_response","辅助模型没有返回可注入的文本结果","auxiliary_step")
+                return response
+            task=loop.create_task(invoke());shared_request_id=source_request_id;cache_status="miss"
+            _auxiliary_inflight[inflight_key]=(task,shared_request_id)
+    try:
+        result=await asyncio.shield(task)
+    except ProtocolError as exc:
+        if cache_status=="miss":
+            with _auxiliary_runtime_lock:
+                current=_auxiliary_inflight.get(inflight_key)
+                if current and current[0] is task:_auxiliary_inflight.pop(inflight_key,None)
+        raise ProtocolError(exc.error_type,str(exc),exc.stage,{**exc.details,"auxiliary_cache_status":cache_status,"shared_request_id":shared_request_id}) from exc
+    if cache_status=="miss":
+        with _auxiliary_runtime_lock:
+            current=_auxiliary_inflight.get(inflight_key)
+            if current and current[0] is task:_auxiliary_inflight.pop(inflight_key,None)
+            if len(_auxiliary_cache)>=AUXILIARY_CACHE_MAX_ENTRIES:
+                oldest=min(_auxiliary_cache,key=lambda key:_auxiliary_cache[key][0]);_auxiliary_cache.pop(oldest,None)
+            _auxiliary_cache[fingerprint]=(time.monotonic()+AUXILIARY_CACHE_TTL_SECONDS,_clone_auxiliary_response(result,include_usage=True),shared_request_id)
+    return _clone_auxiliary_response(result,include_usage=cache_status=="miss"),{"cache_status":cache_status,"shared_request_id":shared_request_id}
+
+
 async def _run_auxiliary_steps(
     db:Session,request:CanonicalRequest,plan:dict[str,Any],*,parent_request_id:str,
     api_token_id:int|None=None,token_prefix_snapshot:str|None=None,
@@ -760,8 +899,6 @@ async def _run_auxiliary_steps(
     for step in plan.get("steps",[]):
         is_post=step.get("workflow_type")=="structured_repair"
         if is_post != (post_response is not None):continue
-        upstream=db.get(UpstreamModel,step["upstream_model_id"]);provider=db.get(ProviderInstance,step["provider_instance_id"])
-        if not upstream or not provider:raise ProtocolError("auxiliary_step_failed","辅助步骤引用已失效","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"]})
         if step.get("workflow_type")=="terminal_capability":aux_request=request
         else:
             source_text=(post_response or {}).get("text")
@@ -782,23 +919,42 @@ async def _run_auxiliary_steps(
                 required_input=[str(step.get("input","text"))],
                 required_output=[str(step.get("output","text"))],
             )
-        timeout=min(float(provider.timeout_seconds),float(step.get("timeout_seconds") or provider.timeout_seconds))
-        provider_values={column.name:getattr(provider,column.name) for column in provider.__table__.columns};provider_values["timeout_seconds"]=timeout
-        provider_for_step=SimpleNamespace(**provider_values)
-        auxiliary_request_id=f"{parent_request_id}:aux:{step['workflow_id']}:{step['step_index']}:{uuid.uuid4().hex[:8]}"
-        step_started=utc_now();step["_clock"]=time.perf_counter()
-        try:
-            result=await _call_http(SimpleNamespace(provider=provider_for_step,upstream=upstream),aux_request)
-            result_text=_clean_auxiliary_text(str(result.get("text") or ""))
-            if step.get("workflow_type") != "terminal_capability" and not result_text:
-                raise ProtocolError("empty_auxiliary_response","辅助模型没有返回可注入的文本结果","auxiliary_step")
-        except ProtocolError as exc:
-            step["status"]="failed";step["error_type"]=exc.error_type
-            _record_auxiliary_log(db,request,step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,error=exc)
-            raise ProtocolError("auxiliary_step_failed","辅助步骤执行失败","auxiliary_step",{"workflow_id":step["workflow_id"],"step_index":step["step_index"],"upstream_model_id":step["upstream_model_id"],"cause":exc.error_type}) from exc
-        step["status"]="succeeded"
-        if result_text:step["output_chars"]=len(result_text)
-        _record_auxiliary_log(db,request,step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,result=result)
+        result:CanonicalResponse|None=None;result_text="";last_error:ProtocolError|None=None;attempts=[]
+        candidate_specs=step.get("candidates") or [{key:step.get(key) for key in ("auxiliary_model_id","upstream_model_id","provider_instance_id","priority")}]
+        for attempt_index,specification in enumerate(candidate_specs,1):
+            upstream=db.get(UpstreamModel,specification["upstream_model_id"]);provider=db.get(ProviderInstance,specification["provider_instance_id"])
+            if not upstream or not provider:
+                last_error=ProtocolError("auxiliary_step_failed","辅助步骤引用已失效","auxiliary_step",{"upstream_model_id":specification.get("upstream_model_id")});attempts.append({"attempt_index":attempt_index,"status":"failed","cause":last_error.error_type});continue
+            timeout=min(float(provider.timeout_seconds),float(step.get("timeout_seconds") or provider.timeout_seconds))
+            provider_values={column.name:getattr(provider,column.name) for column in provider.__table__.columns};provider_values["timeout_seconds"]=timeout
+            provider_for_step=SimpleNamespace(**provider_values)
+            candidate=RouteCandidate(SimpleNamespace(id=specification.get("auxiliary_model_id"),priority=specification.get("priority",0)),upstream,provider_for_step,["辅助候选"])
+            auxiliary_request_id=f"{parent_request_id}:aux:{step['workflow_id']}:{step['step_index']}:{attempt_index}:{uuid.uuid4().hex[:8]}"
+            attempt_step={key:value for key,value in step.items() if key not in {"candidates","attempts","_clock"}}
+            attempt_step.update(specification);attempt_step.update({"attempt_index":attempt_index,"_clock":time.perf_counter()});step_started=utc_now()
+            try:
+                result,sharing=await _call_auxiliary_shared(candidate,aux_request,source_request_id=auxiliary_request_id,require_text=step.get("workflow_type")!="terminal_capability")
+                result_text=_clean_auxiliary_text(str(result.get("text") or ""));attempt_step.update(sharing);attempt_step["status"]="succeeded"
+            except ProtocolError as exc:
+                last_error=exc;attempt_step["status"]="failed";attempt_step["error_type"]=exc.error_type;attempt_step["cache_status"]=exc.details.get("auxiliary_cache_status","miss");attempt_step["shared_request_id"]=exc.details.get("shared_request_id",auxiliary_request_id)
+                if attempt_step["cache_status"]=="miss":
+                    _health(db,candidate,False,(time.perf_counter()-attempt_step["_clock"])*1000,str(exc),_trips_breaker(exc))
+                    if exc.error_type=="upstream_http_error" and int(exc.details.get("status_code") or 0)==429:
+                        db.flush();_open_breaker_immediately(db,candidate)
+                _record_auxiliary_log(db,request,attempt_step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,error=exc)
+                attempts.append({"attempt_index":attempt_index,"auxiliary_model_id":specification.get("auxiliary_model_id"),"upstream_model_id":upstream.id,"provider_instance_id":provider.id,"status":"failed","cause":exc.error_type,"status_code":exc.details.get("status_code")})
+                continue
+            if attempt_step["cache_status"]=="miss":_health(db,candidate,True,(time.perf_counter()-attempt_step["_clock"])*1000)
+            if result_text:attempt_step["output_chars"]=len(result_text)
+            _record_auxiliary_log(db,request,attempt_step,parent_request_id=parent_request_id,request_id=auxiliary_request_id,started=step_started,provider=provider,upstream=upstream,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,result=result)
+            attempts.append({"attempt_index":attempt_index,"auxiliary_model_id":specification.get("auxiliary_model_id"),"upstream_model_id":upstream.id,"provider_instance_id":provider.id,"status":"succeeded","cache_status":attempt_step["cache_status"]})
+            step.update({key:specification.get(key) for key in ("auxiliary_model_id","upstream_model_id","provider_instance_id","priority")});step.update({"status":"succeeded","cache_status":attempt_step["cache_status"],"shared_request_id":attempt_step["shared_request_id"]});break
+        step["attempts"]=attempts
+        if result is None:
+            step["status"]="failed";step["error_type"]=last_error.error_type if last_error else "provider_unavailable"
+            details={"workflow_id":step["workflow_id"],"step_index":step["step_index"],"cause":step["error_type"],"attempts":attempts}
+            if last_error:details.update({key:value for key,value in last_error.details.items() if key in {"status_code","upstream_error_code","upstream_error_message"}})
+            raise ProtocolError("auxiliary_step_failed","全部辅助候选均执行失败","auxiliary_step",details) from last_error
         if step.get("workflow_type")=="terminal_capability":terminal_response=result
         elif is_post:post_response=result
         elif result_text:
@@ -820,23 +976,25 @@ def _clean_auxiliary_text(text:str)->str:
 
 
 def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list[dict[str,Any]]:
-    """Replace image parts with the auxiliary description for text-only routes."""
+    """Replace image parts from every supported ingress protocol."""
     replaced: list[dict[str,Any]] = []
     for message in messages:
         content = message.get("content")
         if not isinstance(content, list):
             replaced.append(message)
             continue
-        parts: list[str] = []
+        parts: list[str] = [];preserved: list[Any] = []
         changed = False
         for part in content:
-            if isinstance(part, dict) and part.get("type") in {"image_url", "input_image"}:
-                changed = True
-                continue
-            if isinstance(part, dict) and part.get("type") in {"text", "input_text"}:
-                parts.append(str(part.get("text") or ""))
+            if isinstance(part,dict):
+                kind=part.get("type");inline=part.get("inlineData") or part.get("inline_data") or {};mime=str(inline.get("mimeType") or inline.get("mime_type") or "") if isinstance(inline,dict) else ""
+                is_image=kind in {"image_url","input_image","image"} or bool(inline and mime.startswith("image/"))
+                if is_image:changed=True;continue
+                if kind in {"text","input_text","output_text"} or (kind is None and "text" in part):parts.append(str(part.get("text") or ""));continue
+                preserved.append(part)
             elif isinstance(part, str):
                 parts.append(part)
+            else:preserved.append(part)
         if changed:
             text = "\n".join(item for item in parts if item.strip())
             if text:
@@ -848,7 +1006,14 @@ def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list
                 "请根据以上识别结果回答当前问题。"
             )
             updated = dict(message)
-            updated["content"] = text
+            if preserved:
+                # Preserve unrelated audio/file/tool parts. Pick the text block
+                # vocabulary already used by this message so no client-specific
+                # branch is needed at the gateway boundary.
+                if any(isinstance(item,dict) and ("inlineData" in item or "fileData" in item or "functionCall" in item) for item in content):text_part={"text":text}
+                else:text_part={"type":"text","text":text}
+                updated["content"]=[*preserved,text_part]
+            else:updated["content"] = text
             replaced.append(updated)
         else:
             replaced.append(message)
@@ -881,6 +1046,14 @@ def _trips_breaker(exc:ProtocolError)->bool:
         status=int(exc.details.get("status_code") or 0)
         return status in {408,429} or status>=500
     return False
+
+
+def _open_breaker_immediately(db:Session,candidate:RouteCandidate)->None:
+    """Skip a rate-limited auxiliary upstream for its configured cooldown."""
+    breaker=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==candidate.upstream.id)) or CircuitBreaker(upstream_model_id=candidate.upstream.id)
+    breaker.state="open";breaker.opened_at=utc_now();breaker.half_open_at=None
+    breaker.consecutive_failures=max(breaker.consecutive_failures or 0,breaker.failure_threshold or 3)
+    db.add(breaker)
 
 
 def _budgets(db:Session,request:CanonicalRequest,unified:UnifiedModel,api_token_id:int|None,provider_id:int|None=None,upstream_model_id:int|None=None)->list[Budget]:
@@ -916,7 +1089,7 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
         unified,candidates,explanation=route_candidates(db,request)
         preflight=_exceeded(_budgets(db,request,unified,api_token_id))
         candidates=_apply_exceeded_budget_actions(preflight,candidates)
-        auxiliary=plan_auxiliary(db,request,unified);request,terminal_response=await _run_auxiliary_steps(db,request,auxiliary,parent_request_id=request_id,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot);last_error:ProtocolError|None=None
+        auxiliary=plan_auxiliary(db,request,unified,candidates);request,terminal_response=await _run_auxiliary_steps(db,request,auxiliary,parent_request_id=request_id,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot);last_error:ProtocolError|None=None
         for candidate in candidates:
             selected=candidate;attempt=time.perf_counter()
             scoped_rejected=[row for row in _exceeded(_budgets(db,request,unified,api_token_id,candidate.provider.id,candidate.upstream.id)) if row.scope in {"provider","provider_instance","upstream_model"} and row.enforcement_action in {"reject","fallback_to_free","fallback_to_cheapest","degrade"}]

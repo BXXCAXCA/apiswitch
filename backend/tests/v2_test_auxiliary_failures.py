@@ -56,7 +56,8 @@ def test_every_workflow_stops_on_timeout_upstream_failure_or_incompatibility(cli
     monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(upstream))
     unified,endpoint,headers=_route(client,workflow_type,input_capability,output_capability,aux_protocol="custom" if failure=="incompatible" else "openai_compatible")
     response=client.post(endpoint,headers=headers,json=payload_factory(unified["name"]))
-    assert response.status_code==400,response.text
+    expected_status={"timeout":504,"http_error":502,"incompatible":400}[failure]
+    assert response.status_code==expected_status,response.text
     error=response.json()["error"];assert error["type"]=="auxiliary_step_failed" and error["stage"]=="auxiliary_step"
     expected={"timeout":"provider_timeout","http_error":"upstream_http_error","incompatible":"protocol_conversion_unsupported"}[failure]
     assert error["details"]["cause"]==expected

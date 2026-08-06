@@ -204,7 +204,12 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
     return unified, eligible, explanation
 
 
-def plan_auxiliary(db: Session, request: CanonicalRequest, unified: UnifiedModel) -> dict[str, Any]:
+def plan_auxiliary(
+    db: Session,
+    request: CanonicalRequest,
+    unified: UnifiedModel,
+    route_pool: list[RouteCandidate] | None = None,
+) -> dict[str, Any]:
     setting = db.get(AuxiliarySettings, 1) or AuxiliarySettings(mode="global_pool")
     if setting.mode == "disabled": return {"mode": "disabled", "steps": []}
     workflows = _applicable_workflows(db, unified)
@@ -214,6 +219,11 @@ def plan_auxiliary(db: Session, request: CanonicalRequest, unified: UnifiedModel
         if workflow.workflow_type=="structured_repair":applicable="json" in request.required_output
         elif workflow.workflow_type=="terminal_capability":applicable=workflow.output_capability in request.required_output
         else:applicable=workflow.input_capability in requested
+        # Do not make a native multimodal route depend on an auxiliary model.
+        # Assistance is required only when at least one eligible fallback has a
+        # real capability gap that the workflow must bridge.
+        if applicable and route_pool and workflow.workflow_type not in {"structured_repair","terminal_capability"}:
+            applicable=not all(workflow.input_capability in _caps(item.upstream,item.candidate) for item in route_pool)
         if applicable:selected.append(workflow)
     steps: list[dict[str, Any]] = []
     for workflow in selected:
@@ -221,11 +231,35 @@ def plan_auxiliary(db: Session, request: CanonicalRequest, unified: UnifiedModel
         for index, specification in enumerate(specifications):
             required = str(specification.get("model_capability") or specification.get("input") or workflow.input_capability)
             pool = list(db.scalars(select(AuxiliaryModel).where(AuxiliaryModel.enabled.is_(True), AuxiliaryModel.unified_model_id == (unified.id if setting.mode == "per_unified_model" else None)).order_by(AuxiliaryModel.priority, AuxiliaryModel.id)).all())
-            aux = next((item for item in pool if required in set(item.capabilities_json or [])), None)
-            if aux is None: raise ProtocolError("auxiliary_workflow_not_configured", "辅助工作流步骤没有配置匹配能力的辅助上游模型", "auxiliary_plan", {"workflow_id": workflow.id, "step_index": index, "required_capability": required})
-            upstream=db.get(UpstreamModel,aux.upstream_model_id);provider=db.get(ProviderInstance,upstream.provider_instance_id) if upstream else None
-            if not upstream or not provider or not upstream.enabled or not provider.enabled or upstream.remote_status=="missing":raise ProtocolError("auxiliary_workflow_not_configured","辅助工作流引用的上游模型不可用","auxiliary_plan",{"workflow_id":workflow.id,"step_index":index,"upstream_model_id":aux.upstream_model_id})
-            steps.append({"workflow_id":workflow.id,"workflow_type":workflow.workflow_type,"step_index":index,"auxiliary_model_id":aux.id,"upstream_model_id":aux.upstream_model_id,"provider_instance_id":provider.id,"status":"planned",**specification})
+            matching=[item for item in pool if required in set(item.capabilities_json or [])]
+            candidates=[];rejected=[]
+            for aux in matching:
+                reasons=[];upstream=db.get(UpstreamModel,aux.upstream_model_id);provider=db.get(ProviderInstance,upstream.provider_instance_id) if upstream else None
+                if not upstream:reasons.append("上游模型不存在")
+                elif not upstream.enabled:reasons.append("上游模型已停用")
+                elif upstream.remote_status=="missing":reasons.append("远端模型已消失")
+                if not provider:reasons.append("供应商实例不存在")
+                elif not provider.enabled:reasons.append("供应商实例已停用")
+                breaker=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==aux.upstream_model_id))
+                if breaker and breaker.state=="open":
+                    if breaker.opened_at and utc_now()>=breaker.opened_at+timedelta(seconds=breaker.cooldown_seconds or 60):
+                        breaker.state="half_open";breaker.half_open_at=utc_now();db.add(breaker)
+                    else:reasons.append("熔断器已开启")
+                quota=db.scalar(select(QuotaSnapshot).where(QuotaSnapshot.upstream_model_id==aux.upstream_model_id).order_by(QuotaSnapshot.captured_at.desc(),QuotaSnapshot.id.desc()))
+                quota_values=[value for value in ((quota.remaining_requests if quota else None),(quota.remaining_tokens if quota else None),(quota.remaining_credit if quota else None)) if value is not None]
+                if any(value<=0 for value in quota_values):reasons.append("上游额度已耗尽")
+                summary={"auxiliary_model_id":aux.id,"upstream_model_id":aux.upstream_model_id,"provider_instance_id":provider.id if provider else None,"priority":aux.priority}
+                if reasons:rejected.append({**summary,"reasons":reasons})
+                else:candidates.append(summary)
+            if not candidates:
+                raise ProtocolError(
+                    "auxiliary_workflow_not_configured",
+                    "辅助工作流步骤没有可用的匹配辅助模型",
+                    "auxiliary_plan",
+                    {"workflow_id":workflow.id,"step_index":index,"required_capability":required,"candidates":rejected},
+                )
+            primary=candidates[0]
+            steps.append({"workflow_id":workflow.id,"workflow_type":workflow.workflow_type,"step_index":index,**primary,"candidates":candidates,"status":"planned",**specification})
     return {"mode": setting.mode, "steps": steps}
 
 
@@ -259,7 +293,7 @@ def execute_mock(db: Session, request: CanonicalRequest, api_token_id: int | Non
     started = utc_now()
     try:
         unified, candidates, explanation = route_candidates(db, request)
-        auxiliary = plan_auxiliary(db, request, unified)
+        auxiliary = plan_auxiliary(db, request, unified, candidates)
         selected = candidates[0]
         log = RequestLog(request_id=request_id, started_at=started, finished_at=utc_now(), inbound_protocol=request.inbound_protocol, unified_model=request.unified_model, provider_instance_id=selected.provider.id, upstream_model_id=selected.upstream.id, combo_strategy=unified.combo_strategy, candidate_summary_json=explanation, auxiliary_summary_json=auxiliary, api_token_id=api_token_id, success=True, latency_ms=0)
         db.add(log); db.commit()

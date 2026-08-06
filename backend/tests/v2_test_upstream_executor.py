@@ -571,9 +571,9 @@ def test_all_open_breakers_report_provider_unavailable_and_log_reasons(client: T
     headers=_token(client);payload={"model":unified["name"],"messages":[{"role":"user","content":"hello"}]}
 
     for _ in range(3):
-        assert client.post("/v1/chat/completions", headers=headers, json=payload).status_code == 400
+        assert client.post("/v1/chat/completions", headers=headers, json=payload).status_code == 502
     blocked = client.post("/v1/chat/completions", headers=headers, json=payload)
-    assert blocked.status_code == 400
+    assert blocked.status_code == 503
     assert blocked.json()["error"]["type"] == "provider_unavailable"
     assert blocked.json()["error"]["stage"] == "circuit_breaker"
     assert blocked.json()["error"]["details"]["candidates"][0]["reasons"] == ["熔断器已开启"]
