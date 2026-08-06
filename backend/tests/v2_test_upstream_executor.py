@@ -399,12 +399,15 @@ def test_nullable_tool_arrays_and_reasoning_content_are_preserved(client:TestCli
 
 def test_anthropic_ingress_is_normalized_and_zero_output_empty_completion_is_retried(client:TestClient,monkeypatch):
     captured=[]
+    delays=[]
+    async def no_sleep(seconds:float):delays.append(seconds)
     def upstream(request:httpx.Request)->httpx.Response:
         captured.append(json.loads(request.content))
         if len(captured)==1:
             return httpx.Response(200,json={"id":"empty","object":"chat.completion","choices":None,"usage":{"prompt_tokens":12,"completion_tokens":0,"total_tokens":12}})
         return httpx.Response(200,json={"id":"ok","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"你好"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":1,"total_tokens":13}})
 
+    monkeypatch.setattr(executor.asyncio,"sleep",no_sleep)
     monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(upstream))
     provider_id=_provider(client,"https://normalized-anthropic.invalid/v1")
     upstream_model=client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models",json={"model_id":"normalized","input_capabilities_json":["text"],"output_capabilities_json":["text"]}).json()
@@ -418,11 +421,92 @@ def test_anthropic_ingress_is_normalized_and_zero_output_empty_completion_is_ret
     response=client.post("/v1/messages",headers=_token(client),json=payload)
     assert response.status_code==200,response.text
     assert len(captured)==2
+    assert delays==[0.5]
     assert captured[0]==captured[1]
-    assert captured[0]["stream"] is False
+    assert captured[0]["stream"] is True
+    assert captured[0]["stream_options"]=={"include_usage":True}
     assert captured[0]["messages"]==[{"role":"system","content":"system text"},{"role":"user","content":"你好"}]
     assert {key:captured[0][key] for key in ("max_tokens","temperature","top_p","stop")}=={"max_tokens":4096,"temperature":0.6,"top_p":0.9,"stop":["END"]}
     assert '"type":"text_delta","text":"你好"' in response.text
+
+
+def test_zero_output_empty_completion_uses_bounded_exponential_backoff(client:TestClient,monkeypatch):
+    captured=[];delays=[]
+    async def no_sleep(seconds:float):delays.append(seconds)
+    def upstream(request:httpx.Request)->httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200,json={"id":"empty","object":"chat.completion","choices":None,"usage":{"prompt_tokens":12,"completion_tokens":0,"total_tokens":12}})
+
+    monkeypatch.setattr(executor.asyncio,"sleep",no_sleep)
+    monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(upstream))
+    provider_id=_provider(client,"https://persistent-empty.invalid/v1")
+    upstream_model=client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models",json={"model_id":"persistent-empty","input_capabilities_json":["text"],"output_capabilities_json":["text"]}).json()
+    unified=client.post("/api/admin/unified-models",json={"name":f"persistent-empty-{uuid4().hex}","enabled_protocols":["openai_chat"]}).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":upstream_model["id"]})
+
+    response=client.post("/v1/chat/completions",headers=_token(client),json={"model":unified["name"],"messages":[{"role":"user","content":"hello"}]})
+
+    assert response.status_code==400
+    assert response.json()["error"]["type"]=="invalid_upstream_response"
+    assert len(captured)==executor.EMPTY_COMPLETION_MAX_ATTEMPTS
+    assert delays==[0.5,1.0,2.0]
+
+
+def test_non_stream_empty_completion_falls_back_to_completed_upstream_sse(client:TestClient,monkeypatch):
+    captured=[];delays=[]
+    async def no_sleep(seconds:float):delays.append(seconds)
+    def upstream(request:httpx.Request)->httpx.Response:
+        payload=json.loads(request.content);captured.append(payload)
+        if len(captured)==1:
+            return httpx.Response(200,json={"id":"empty","object":"chat.completion","choices":None,"usage":{"prompt_tokens":12,"completion_tokens":0,"total_tokens":12}})
+        body=(
+            'data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"思考"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{"content":"连接成功"},"finish_reason":null}]}\n\n'
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+            'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n'
+            'data: [DONE]\n\n'
+        )
+        return httpx.Response(200,text=body,headers={"content-type":"text/event-stream"})
+
+    monkeypatch.setattr(executor.asyncio,"sleep",no_sleep)
+    monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(upstream))
+    provider_id=_provider(client,"https://stream-fallback.invalid/v1")
+    upstream_model=client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models",json={"model_id":"stream-fallback","input_capabilities_json":["text"],"output_capabilities_json":["text"]}).json()
+    unified=client.post("/api/admin/unified-models",json={"name":f"stream-fallback-{uuid4().hex}","enabled_protocols":["openai_chat"]}).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":upstream_model["id"]})
+
+    response=client.post("/v1/chat/completions",headers=_token(client),json={"model":unified["name"],"messages":[{"role":"user","content":"hello"}],"stream":False})
+
+    assert response.status_code==200,response.text
+    assert captured[0]["stream"] is False and captured[1]["stream"] is True
+    assert captured[1]["stream_options"]=={"include_usage":True}
+    assert delays==[0.5]
+    assert response.json()["choices"][0]["message"]["content"]=="连接成功"
+    assert response.json()["choices"][0]["message"]["reasoning_content"]=="思考"
+    assert response.json()["usage"]=={"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}
+
+
+def test_upstream_sse_tool_call_fragments_are_losslessly_aggregated(client:TestClient,monkeypatch):
+    body=(
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"weather","arguments":"{\\\"city\\\":"}}]},"finish_reason":null}]}\n\n'
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\\"Shanghai\\\"}"}}]},"finish_reason":null}]}\n\n'
+        'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+        'data: [DONE]\n\n'
+    )
+    monkeypatch.setattr(executor,"HTTP_TRANSPORT",httpx.MockTransport(lambda _:httpx.Response(200,text=body,headers={"content-type":"text/event-stream"})))
+    provider_id=_provider(client,"https://stream-tools.invalid/v1")
+    upstream_model=client.post(f"/api/admin/provider-instances/{provider_id}/upstream-models",json={"model_id":"stream-tools","input_capabilities_json":["text","tools"],"output_capabilities_json":["text","tools"]}).json()
+    unified=client.post("/api/admin/unified-models",json={"name":f"stream-tools-{uuid4().hex}","enabled_protocols":["openai_chat"]}).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":upstream_model["id"]})
+    tool={"type":"function","function":{"name":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}}}}}
+
+    response=client.post("/v1/chat/completions",headers=_token(client),json={"model":unified["name"],"messages":[{"role":"user","content":"weather"}],"tools":[tool]})
+
+    assert response.status_code==200,response.text
+    call=response.json()["choices"][0]["message"]["tool_calls"][0]
+    assert call["id"]=="call_weather"
+    assert call["function"]["name"]=="weather"
+    assert json.loads(call["function"]["arguments"])=={"city":"Shanghai"}
 
 
 def test_plural_upstream_error_is_preserved_and_does_not_trip_breaker(client: TestClient, monkeypatch):

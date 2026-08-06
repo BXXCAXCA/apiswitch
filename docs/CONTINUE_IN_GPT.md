@@ -1,8 +1,8 @@
 # 在 GPT 网页版继续开发 APISwitch
 
-> 本文是当前唯一的续开发交接入口。更新时间：2026-08-05（Asia/Shanghai）。
+> 本文是当前唯一的续开发交接入口。更新时间：2026-08-06（Asia/Shanghai）。
 >
-> 仓库：[BXXCAXCA/apiswitch](https://github.com/BXXCAXCA/apiswitch) · 默认分支：`main` · 当前发布：[v0.1.11](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.11)
+> 仓库：[BXXCAXCA/apiswitch](https://github.com/BXXCAXCA/apiswitch) · 默认分支：`main` · 当前发布：[v0.1.12](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.12)
 
 ## 使用方法
 
@@ -14,7 +14,7 @@
 
 - 产品主链路固定为：`供应商实例 → 上游模型 → 统一模型/辅助模型 → 客户端 API Token → 统一网关调用`。不得恢复旧的 Connection/Node 结构。
 - OpenAI Chat、Responses、Anthropic、Gemini 及文件、图像、音频等入口都应经过 Canonical 管线、能力检查、路由、Token、日志与结构化错误处理。
-- `v0.1.11` 在此前 Responses SSE 与辅助日志修复基础上，统一了模型目录和客户端配置中的有效能力声明；由视觉辅助工作流补齐的统一模型会向 OpenAI、Gemini、OpenCode、OpenClaw 与 Cherry Studio 声明图像输入能力。
+- `v0.1.12` 在视觉能力声明修复基础上，支持收集并无损聚合 OpenAI-Compatible 上游 SSE。零输出 `choices: null` 会有限退避并切换为流式上游，正文、思考、工具调用分片和 Token 用量均进入 Canonical 响应。
 - Windows 桌面端已修复陈旧运行时状态阻塞启动的问题；默认网关优先使用 `127.0.0.1:8080`，端口冲突时自动回退。
 - GitHub Actions 会在 `main` 推送后运行后端、前端、敏感信息扫描、Windows 打包和冒烟测试；全部成功后自动创建/更新同版本 GitHub Release，并上传 EXE 与 SHA-256。
 
@@ -22,11 +22,11 @@
 
 | 项目 | 结果 |
 |---|---|
-| 后端测试 | `131 passed` |
+| 后端测试 | `134 passed` |
 | 前端测试 | `25 passed` |
 | Ruff | `backend` 的 `F,E9` 检查通过 |
-| 本地 Windows 打包 | `dist/APISwitch-v0.1.11.exe` 已生成并通过桌面冒烟测试 |
-| 云端 CI 与发布 | `main` 推送后由 GitHub Actions 自动构建并发布 [v0.1.11](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.11) |
+| 本地 Windows 打包 | `dist/APISwitch-v0.1.12.exe` 已生成并通过桌面冒烟测试 |
+| 云端 CI 与发布 | `main` 推送后由 GitHub Actions 自动构建并发布 [v0.1.12](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.12) |
 
 真实上游供应商仍可能返回额度或速率限制（例如 HTTP 429）；这属于供应商账户/配额状态，不应与协议转换错误混淆。
 

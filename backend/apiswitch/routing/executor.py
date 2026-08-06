@@ -5,6 +5,8 @@ can use ``httpx.MockTransport`` without contacting a real provider.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import time
 import uuid
@@ -27,6 +29,8 @@ from apiswitch.security.outbound import OutboundURLRejected,validate_outbound_ur
 from apiswitch.services.budget_enforcement import accumulate_budget_spend, budget_is_exceeded, matching_budgets
 
 HTTP_TRANSPORT: httpx.AsyncBaseTransport | None = None
+EMPTY_COMPLETION_MAX_ATTEMPTS = 4
+EMPTY_COMPLETION_RETRY_BASE_SECONDS = 0.5
 
 
 def _canonical_tools(request:CanonicalRequest)->list[dict[str,Any]]:
@@ -333,9 +337,11 @@ def _openai_payload(request: CanonicalRequest, model: str) -> dict[str, Any]:
             if system:payload["messages"] = [{"role": "system", "content": system}, *messages]
         if request.tools: payload["tools"] = _tools_for_provider(request,"openai")
         if request.tool_choice is not None:payload["tool_choice"]=_tool_choice_for_provider(request,"openai")
-        # The gateway emits protocol-correct SSE itself.  This keeps conversion
-        # and error handling deterministic even for non-OpenAI upstreams.
-        payload["stream"] = False
+        # The gateway still emits the client-facing SSE itself, but compatible
+        # providers may be more reliable in streaming mode. Their chunks are
+        # collected into one canonical response below before egress rendering.
+        payload["stream"] = request.stream
+        if request.stream:payload["stream_options"]={"include_usage":True}
         return payload
     return {key: value for key, value in request.parameters.items() if not key.startswith("_apiswitch_")} | {"model": model}
 
@@ -435,14 +441,20 @@ def _response_shape(value:Any,depth:int=0)->Any:
 
 
 def _retryable_empty_openai_response(raw:Any,protocol:str,request_type:str)->bool:
-    """Retry once when a compatible backend produced no completion output.
+    """Retry when a compatible backend produced no completion output.
 
     Some OpenAI-compatible inference services account prompt tokens and return a
     transient ``choices: null`` placeholder with zero completion tokens.  It is
-    safe to retry that response once because there is no model output to lose.
-    Never retry when the provider reports generated output tokens.
+    safe to retry that response because there is no model output to lose.  Never
+    retry when the provider reports generated output tokens.
     """
-    if protocol not in {"openai","openai_compatible"} or request_type!="chat" or not isinstance(raw,dict):return False
+    if protocol not in {"openai","openai_compatible"} or request_type!="chat":return False
+    if isinstance(raw,list):
+        events=[item for item in raw if isinstance(item,dict)]
+        if any(isinstance(item.get("choices"),list) and item["choices"] for item in events):return False
+        usage=next((item["usage"] for item in reversed(events) if isinstance(item.get("usage"),dict)),{})
+        raw={"choices":[],"usage":usage}
+    if not isinstance(raw,dict):return False
     if raw.get("choices") not in (None,[]):return False
     usage=raw.get("usage")
     if not isinstance(usage,dict):return False
@@ -450,6 +462,19 @@ def _retryable_empty_openai_response(raw:Any,protocol:str,request_type:str)->boo
     if completion is not None:return completion in (0,0.0,"0")
     prompt=usage.get("prompt_tokens",usage.get("input_tokens"));total=usage.get("total_tokens")
     return prompt is not None and total is not None and str(prompt)==str(total)
+
+
+def _openai_sse_events(body:str)->list[dict[str,Any]]:
+    events=[]
+    for line in body.splitlines():
+        if not line.startswith("data:"):continue
+        data=line[len("data:"):].strip()
+        if not data or data=="[DONE]":continue
+        value=json.loads(data)
+        if not isinstance(value,dict):raise ValueError("SSE data is not an object")
+        events.append(value)
+    if not events:raise ValueError("SSE contains no JSON data events")
+    return events
 
 
 def _openai_text_content(value:Any,path:str)->str:
@@ -505,21 +530,37 @@ def _openai_response_payload(raw:Any,request:CanonicalRequest)->dict[str,Any]:
 
     found=walk(raw)
     if found:return found
-    if isinstance(raw,list) and raw and not request.tools:
+    if isinstance(raw,list) and raw:
         text_parts:list[str]=[];reasoning_parts:list[str]=[];usage:dict[str,Any]={};finish_reason:Any=None
+        tool_fragments:dict[int,dict[str,Any]]={};saw_choice=False
         for event in raw:
             payload=walk(event)
-            if not payload or not payload.get("choices"):raise KeyError("chunk array contains no choices")
+            if not payload:raise KeyError("chunk array contains an unknown event")
+            if isinstance(payload.get("usage"),dict):usage.update(payload["usage"])
+            if not payload.get("choices"):continue
             choice=payload["choices"][0]
             if not isinstance(choice,dict):raise KeyError("chunk choice is not an object")
+            saw_choice=True
             delta=choice.get("delta")
             if not isinstance(delta,dict):raise KeyError("chunk has no delta")
             text,part_reasoning=_openai_message_content(delta.get("content"),"choices[0].delta.content")
             text_parts.append(text);reasoning_parts.append(_openai_text_content(delta.get("reasoning_content"),"choices[0].delta.reasoning_content") or part_reasoning)
-            finish_reason=choice.get("finish_reason")
-            if isinstance(payload.get("usage"),dict):usage.update(payload["usage"])
-        if finish_reason is None:raise KeyError("chunk array is unfinished")
-        return {"choices":[{"message":{"content":"".join(text_parts),"reasoning_content":"".join(reasoning_parts)},"finish_reason":finish_reason}],"usage":usage}
+            for position,item in enumerate(delta.get("tool_calls") or []):
+                if not isinstance(item,dict):raise KeyError("tool call delta is not an object")
+                index=item.get("index",position)
+                if not isinstance(index,int):raise KeyError("tool call delta index is not an integer")
+                fragment=tool_fragments.setdefault(index,{"id":None,"type":"function","function":{"name":"","arguments":""}})
+                if item.get("id"):fragment["id"]=item["id"]
+                if item.get("type"):fragment["type"]=item["type"]
+                function=item.get("function") or {}
+                if not isinstance(function,dict):raise KeyError("tool call delta function is not an object")
+                if function.get("name"):fragment["function"]["name"]+=str(function["name"])
+                if function.get("arguments"):fragment["function"]["arguments"]+=str(function["arguments"])
+            if choice.get("finish_reason") is not None:finish_reason=choice["finish_reason"]
+        if not saw_choice or finish_reason is None:raise KeyError("chunk array is unfinished")
+        message={"content":"".join(text_parts),"reasoning_content":"".join(reasoning_parts)}
+        if tool_fragments:message["tool_calls"]=[tool_fragments[index] for index in sorted(tool_fragments)]
+        return {"choices":[{"message":message,"finish_reason":finish_reason}],"usage":usage}
     if isinstance(raw,dict):return raw
     raise KeyError("response is not an object")
 
@@ -581,7 +622,7 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
     else:
         raise ProtocolError("protocol_conversion_unsupported",f"自定义协议 {protocol} 尚未配置可靠转换器","upstream_conversion")
     raw:Any=None
-    for attempt in range(2):
+    for attempt in range(EMPTY_COMPLETION_MAX_ATTEMPTS):
         try:
             async with httpx.AsyncClient(timeout=provider.timeout_seconds,transport=HTTP_TRANSPORT,proxy=proxy) as client:
                 multipart=request.parameters.get("_apiswitch_multipart") or []
@@ -610,13 +651,22 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
                 mock=False,
                 upstream_url=url.split("?",1)[0],
             )
-        try:raw=response.json()
+        try:raw=_openai_sse_events(response.text) if "text/event-stream" in response_content_type else response.json()
         except ValueError as exc:raise ProtocolError("invalid_upstream_response","上游响应不是有效 JSON","upstream_response") from exc
-        upstream_error=_upstream_error(raw)
+        upstream_error=None
+        if isinstance(raw,list):
+            for event in raw:
+                upstream_error=_upstream_error(event)
+                if upstream_error:break
+        else:upstream_error=_upstream_error(raw)
         if upstream_error:
             message,details=upstream_error
             raise ProtocolError("upstream_response_error",f"上游返回错误响应：{message}","upstream_response",{"provider_instance_id":provider.id,**details})
-        if attempt==1 or not _retryable_empty_openai_response(raw,protocol,request.request_type):break
+        if not _retryable_empty_openai_response(raw,protocol,request.request_type):break
+        if attempt+1>=EMPTY_COMPLETION_MAX_ATTEMPTS:break
+        if protocol in {"openai","openai_compatible"} and request.request_type=="chat":
+            payload["stream"]=True;payload["stream_options"]={"include_usage":True};headers["Accept"]="text/event-stream"
+        await asyncio.sleep(EMPTY_COMPLETION_RETRY_BASE_SECONDS*(2**attempt))
     text="";reasoning_content="";tool_calls=[]
     parsed_raw=raw
     if protocol in {"openai","openai_compatible"} and request.request_type=="chat":
@@ -633,7 +683,8 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
             parts=raw["candidates"][0]["content"]["parts"];text="".join(str(part.get("text","")) for part in parts if isinstance(part,dict))
             tool_calls=[{"id":None,"name":part["functionCall"].get("name",""),"arguments":part["functionCall"].get("args") or {}} for part in parts if isinstance(part,dict) and isinstance(part.get("functionCall"),dict)]
         except (KeyError,IndexError,TypeError) as exc:raise ProtocolError("invalid_upstream_response","Gemini 响应缺少 candidates.content.parts","upstream_response") from exc
-    usage=parsed_raw.get("usage",raw.get("usage",{})) if isinstance(parsed_raw,dict) and isinstance(raw,dict) else {}
+    usage=parsed_raw.get("usage",{}) if isinstance(parsed_raw,dict) else {}
+    if not usage and isinstance(raw,dict):usage=raw.get("usage",{})
     return CanonicalResponse(text=text,reasoning_content=reasoning_content,tool_calls=tool_calls,raw=raw,usage=usage,mock=False,upstream_url=url.split("?",1)[0])
 
 
