@@ -465,6 +465,16 @@ def _candidate_out(db: Session, row: UnifiedModelCandidate) -> dict[str, Any]:
     return {"id":row.id,"upstream_model_id":row.upstream_model_id,"priority":row.priority,"weight":row.weight,"capability_overrides":row.capability_overrides_json or {},"enabled":row.enabled,"upstream_model":_model_out(upstream) if upstream else None,"provider_instance":_provider_out(provider) if provider else None}
 
 
+def _apply_priority_order(rows: list[Any], ordered_ids: Any, resource_name: str) -> None:
+    if not isinstance(ordered_ids, list) or any(not isinstance(row_id, int) for row_id in ordered_ids):
+        raise _error("validation_error", f"{resource_name}排序必须是 ID 数组")
+    rows_by_id = {row.id: row for row in rows}
+    if len(ordered_ids) != len(rows_by_id) or set(ordered_ids) != set(rows_by_id):
+        raise _error("validation_error", f"{resource_name}排序必须包含当前全部项目且不能重复")
+    for priority, row_id in enumerate(ordered_ids, start=1):
+        rows_by_id[row_id].priority = priority
+
+
 def _unified_out(db: Session, row: UnifiedModel) -> dict[str, Any]:
     return {"id":row.id,"name":row.name,"description":row.description,"required_capabilities":row.required_capabilities_json or {},"enabled_protocols":row.enabled_protocols_json or [],"routing_mode":row.routing_mode,"combo_strategy":row.combo_strategy,"preferred_tier":row.preferred_tier,"session_affinity_enabled":row.session_affinity_enabled,"max_cost_per_request":row.max_cost_per_request,"max_latency_ms":row.max_latency_ms,"min_context_window":row.min_context_window,"enabled":row.enabled,"candidates":[_candidate_out(db,c) for c in db.scalars(select(UnifiedModelCandidate).where(UnifiedModelCandidate.unified_model_id==row.id).order_by(UnifiedModelCandidate.priority)).all()]}
 
@@ -525,7 +535,18 @@ def add_candidate(unified_id:int,payload:dict[str,Any]=Body(...),db:Session=Depe
     upstream_id=payload.get("upstream_model_id")
     if not db.get(UpstreamModel,upstream_id):raise _error("validation_error","上游模型不存在")
     overrides=_valid_capability_map(payload.get("capability_overrides",{}),field="capability_overrides")
-    row=UnifiedModelCandidate(unified_model_id=unified_id,upstream_model_id=upstream_id,priority=payload.get("priority",100),weight=payload.get("weight",100),capability_overrides_json=overrides,enabled=payload.get("enabled",True));db.add(row);db.commit();db.refresh(row);return _candidate_out(db,row)
+    priority=payload.get("priority")
+    if priority is None:priority=(db.scalar(select(func.max(UnifiedModelCandidate.priority)).where(UnifiedModelCandidate.unified_model_id==unified_id)) or 0)+1
+    row=UnifiedModelCandidate(unified_model_id=unified_id,upstream_model_id=upstream_id,priority=priority,weight=payload.get("weight",100),capability_overrides_json=overrides,enabled=payload.get("enabled",True));db.add(row);db.commit();db.refresh(row);return _candidate_out(db,row)
+
+
+@router.patch("/unified-models/{unified_id}/candidates/reorder")
+def reorder_candidates(unified_id:int,payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->list[dict[str,Any]]:
+    if not db.get(UnifiedModel,unified_id):raise HTTPException(404,"统一模型不存在")
+    rows=list(db.scalars(select(UnifiedModelCandidate).where(UnifiedModelCandidate.unified_model_id==unified_id)).all())
+    _apply_priority_order(rows,payload.get("ids"),"候选模型")
+    db.commit()
+    return [_candidate_out(db,row) for row in sorted(rows,key=lambda item:(item.priority,item.id))]
 
 
 @router.patch("/unified-models/{unified_id}/candidates/{candidate_id}")
@@ -587,7 +608,17 @@ def _auxiliary_model_out(db: Session, row: AuxiliaryModel) -> dict[str, Any]:
 def add_auxiliary_model(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->dict[str,Any]:
     if not db.get(UpstreamModel,payload.get("upstream_model_id")):raise _error("validation_error","上游模型不存在")
     capabilities=_valid_capabilities(payload.get("capabilities",[]),field="capabilities")
-    row=AuxiliaryModel(upstream_model_id=payload["upstream_model_id"],unified_model_id=payload.get("unified_model_id"),capabilities_json=capabilities,priority=payload.get("priority",100),enabled=payload.get("enabled",True));db.add(row);db.commit();return _auxiliary_model_out(db,row)
+    priority=payload.get("priority")
+    if priority is None:priority=(db.scalar(select(func.max(AuxiliaryModel.priority))) or 0)+1
+    row=AuxiliaryModel(upstream_model_id=payload["upstream_model_id"],unified_model_id=payload.get("unified_model_id"),capabilities_json=capabilities,priority=priority,enabled=payload.get("enabled",True));db.add(row);db.commit();return _auxiliary_model_out(db,row)
+
+
+@router.patch("/auxiliary/models/reorder")
+def reorder_auxiliary_models(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->list[dict[str,Any]]:
+    rows=list(db.scalars(select(AuxiliaryModel)).all())
+    _apply_priority_order(rows,payload.get("ids"),"辅助模型")
+    db.commit()
+    return [_auxiliary_model_out(db,row) for row in sorted(rows,key=lambda item:(item.priority,item.id))]
 
 
 @router.patch("/auxiliary/models/{model_id}")
@@ -608,7 +639,7 @@ def _workflow_out(row: AuxiliaryWorkflow) -> dict[str, Any]:
 
 
 @router.get("/auxiliary/workflows")
-def list_auxiliary_workflows(db:Session=Depends(get_db))->list[dict[str,Any]]: return [_workflow_out(row) for row in db.scalars(select(AuxiliaryWorkflow).order_by(AuxiliaryWorkflow.id)).all()]
+def list_auxiliary_workflows(db:Session=Depends(get_db))->list[dict[str,Any]]: return [_workflow_out(row) for row in db.scalars(select(AuxiliaryWorkflow).order_by(AuxiliaryWorkflow.priority,AuxiliaryWorkflow.id)).all()]
 
 
 @router.post("/auxiliary/workflows",status_code=201)
@@ -619,7 +650,17 @@ def add_auxiliary_workflow(payload:dict[str,Any]=Body(...),db:Session=Depends(ge
     output_capability=_valid_capabilities([payload.get("output_capability","text")],field="output_capability")[0]
     try:steps=normalize_workflow_steps(payload.get("ordered_steps",[]))
     except ValueError as exc:raise _error("validation_error",str(exc),"capability_validation") from exc
-    row=AuxiliaryWorkflow(scope=payload.get("scope","global"),unified_model_id=payload.get("unified_model_id"),workflow_type=workflow_type,input_capability=input_capability,output_capability=output_capability,ordered_steps_json=steps,priority=payload.get("priority",100),enabled=payload.get("enabled",True));db.add(row);db.commit();return _workflow_out(row)
+    priority=payload.get("priority")
+    if priority is None:priority=(db.scalar(select(func.max(AuxiliaryWorkflow.priority))) or 0)+1
+    row=AuxiliaryWorkflow(scope=payload.get("scope","global"),unified_model_id=payload.get("unified_model_id"),workflow_type=workflow_type,input_capability=input_capability,output_capability=output_capability,ordered_steps_json=steps,priority=priority,enabled=payload.get("enabled",True));db.add(row);db.commit();return _workflow_out(row)
+
+
+@router.patch("/auxiliary/workflows/reorder")
+def reorder_auxiliary_workflows(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->list[dict[str,Any]]:
+    rows=list(db.scalars(select(AuxiliaryWorkflow)).all())
+    _apply_priority_order(rows,payload.get("ids"),"辅助工作流")
+    db.commit()
+    return [_workflow_out(row) for row in sorted(rows,key=lambda item:(item.priority,item.id))]
 
 
 @router.patch("/auxiliary/workflows/{workflow_id}")
