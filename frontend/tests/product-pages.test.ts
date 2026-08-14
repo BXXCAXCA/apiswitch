@@ -318,6 +318,74 @@ describe('generation two product pages', () => {
     getMock.mockImplementation(async () => [] as any)
   })
 
+  it('reorders unified candidates by dragging rows instead of editing priority numbers', async () => {
+    const getMock = vi.mocked(getJson)
+    const patchMock = vi.mocked(patchJson)
+    const candidates = [
+      { id: 1, upstream_model_id: 101, priority: 1, weight: 100, enabled: true },
+      { id: 2, upstream_model_id: 102, priority: 2, weight: 100, enabled: true },
+      { id: 3, upstream_model_id: 103, priority: 3, weight: 100, enabled: true }
+    ]
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/unified-models') return [{ id: 7, name: 'drag-model', candidates }] as any
+      return [] as any
+    })
+    patchMock.mockResolvedValue([] as any)
+
+    const wrapper = mountWithMessage(UnifiedModelsView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('拖动候选行即可调整优先级')
+    expect(wrapper.findAllComponents({ name: 'FormItem' }).some(item => item.props('label') === '优先级')).toBe(false)
+    const table: any = wrapper.findComponent('[data-testid="candidate-priority-table"]')
+    const rowProps = table.props('rowProps')
+    const dataTransfer = { effectAllowed: '', dropEffect: '', setData: vi.fn() }
+    rowProps(candidates[0]).onDragstart({ dataTransfer })
+    rowProps(candidates[2]).onDrop({ preventDefault: vi.fn(), dataTransfer })
+    await flushPromises()
+
+    expect(patchMock).toHaveBeenCalledWith('/api/admin/unified-models/7/candidates/reorder', { ids: [2, 3, 1] })
+    wrapper.unmount()
+    patchMock.mockClear()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
+  it('reorders auxiliary models and workflows by dragging rows', async () => {
+    const getMock = vi.mocked(getJson)
+    const patchMock = vi.mocked(patchJson)
+    const models = [{ id: 11, priority: 1, enabled: true }, { id: 12, priority: 2, enabled: true }]
+    const workflows = [
+      { id: 21, priority: 1, workflow_type: 'context_compress', input_capability: 'text', output_capability: 'text', ordered_steps: [], enabled: true },
+      { id: 22, priority: 2, workflow_type: 'tool_plan', input_capability: 'text', output_capability: 'text', ordered_steps: [], enabled: true }
+    ]
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/auxiliary/settings') return { mode: 'global_pool' } as any
+      if (url === '/api/admin/auxiliary/models') return models as any
+      if (url === '/api/admin/auxiliary/workflows') return workflows as any
+      return [] as any
+    })
+    patchMock.mockResolvedValue([] as any)
+
+    const wrapper = mountWithMessage(AuxiliaryModelsView)
+    await flushPromises()
+    expect(wrapper.text()).toContain('拖动辅助模型行即可调整优先级')
+    expect(wrapper.text()).toContain('拖动工作流行即可调整执行顺序')
+    expect(wrapper.findAllComponents({ name: 'FormItemGi' }).some(item => ['优先级', '工作流顺序'].includes(item.props('label')))).toBe(false)
+    const dataTransfer = { effectAllowed: '', dropEffect: '', setData: vi.fn() }
+    const modelTable: any = wrapper.findComponent('[data-testid="aux-model-priority-table"]')
+    modelTable.props('rowProps')(models[0]).onDragstart({ dataTransfer })
+    modelTable.props('rowProps')(models[1]).onDrop({ preventDefault: vi.fn(), dataTransfer })
+    const workflowTable: any = wrapper.findComponent('[data-testid="workflow-priority-table"]')
+    workflowTable.props('rowProps')(workflows[1]).onDragstart({ dataTransfer })
+    workflowTable.props('rowProps')(workflows[0]).onDrop({ preventDefault: vi.fn(), dataTransfer })
+    await flushPromises()
+
+    expect(patchMock).toHaveBeenCalledWith('/api/admin/auxiliary/models/reorder', { ids: [12, 11] })
+    expect(patchMock).toHaveBeenCalledWith('/api/admin/auxiliary/workflows/reorder', { ids: [22, 21] })
+    wrapper.unmount()
+    patchMock.mockClear()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
   it('offers explicit unified-model authorization when creating a token', async () => {
     const getMock = vi.mocked(getJson)
     getMock.mockImplementation(async (url: string) => url === '/api/admin/unified-models'
