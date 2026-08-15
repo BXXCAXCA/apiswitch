@@ -2,7 +2,7 @@
 
 APISwitch 是一个 Windows 优先、本地优先的多供应商 AI API 网关。客户端只需要连接一个本地地址并使用稳定的“统一模型”名称，APISwitch 在内部完成供应商管理、模型同步、协议转换、路由、视觉等辅助工作流、鉴权、预算和调用日志。
 
-当前源码版本：`v0.1.14` · [下载 Windows 版本](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.14) · [查看全部 Releases](https://github.com/BXXCAXCA/apiswitch/releases)
+当前源码版本：`v0.1.15` · [下载 Windows 版本](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.15) · [查看全部 Releases](https://github.com/BXXCAXCA/apiswitch/releases)
 
 > 当前产品结构为“供应商实例 → 上游模型 → 统一模型/辅助模型 → 客户端 Token → 统一网关”。旧的 Connection/Node 和“路由状态”前端页面不再使用。
 
@@ -167,8 +167,8 @@ Cherry Studio / Codex / Claude Code / 自建客户端
 
 ### 1. 安装
 
-1. 打开 [APISwitch v0.1.14 Release](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.14)。
-2. 下载 `APISwitch-v0.1.14.exe`；需要校验时同时下载 `.sha256.txt`。
+1. 打开 [APISwitch v0.1.15 Release](https://github.com/BXXCAXCA/apiswitch/releases/tag/v0.1.15)。
+2. 下载 `APISwitch-v0.1.15.exe`；需要校验时同时下载 `.sha256.txt`。
 3. 运行 EXE。程序会启动本地网关并打开管理界面，关闭窗口后可继续驻留系统托盘。
 
 桌面版数据保存在：
@@ -230,6 +230,8 @@ Cherry Studio / Codex / Claude Code / 自建客户端
 
 “识别能力”根据模型名称和远端元数据推断，只是配置建议。低置信度结果必须人工核对，尤其不能仅凭模型名给纯文本模型勾选视觉能力。
 
+模型列表默认汇总全部供应商，也可按供应商筛选。可跨不同供应商勾选多个上游模型后执行“批量配置”，一次覆盖它们的输入/输出能力、上下文与最大输出、价格和标签；如果任一模型不存在，整批操作都会拒绝，不会产生部分更新。
+
 ### 统一模型
 
 统一模型是客户端最终看到和调用的模型。稳定模型名一旦交给客户端使用，建议不要频繁修改；需要替换供应商时只调整候选上游模型。
@@ -249,7 +251,8 @@ Cherry Studio / Codex / Claude Code / 自建客户端
 
 创建统一模型后，在“候选上游模型”区域完成绑定：
 
-- **优先级**：数字越小越靠前；默认策略和失败回退首先参考该顺序。
+- **上游模型（可多选）**：一次选择多个上游模型并原子添加为候选；已绑定模型不会再次出现在可选列表中。
+- **优先级**：拖动候选行调整顺序；越靠前优先级越高，默认策略和失败回退首先参考该顺序。
 - **权重**：仅加权策略使用；数值越大，被首次选中的概率越高。
 - **覆盖输入/输出能力（完全替换）**：留空表示继承上游模型能力；一旦勾选，该方向就以勾选结果完整替换上游声明，不是追加。只有同一上游模型在该统一模型下需要特殊限制时才使用。
 - **启用**：统一模型、候选、上游模型和供应商实例必须同时启用，客户端才能获取和调用模型。
@@ -336,12 +339,12 @@ Token 明文只在创建或重置时显示一次。复制后再关闭提示；�
 1. 选择 Agent 类型，界面只显示支持该 Agent 所需入口协议的统一模型。
 2. 检查配置路径；留空时使用界面提示的默认路径。
 3. 选择主模型。Claude Code 还可分别指定 Opus、Sonnet、Haiku，留空则使用主模型。
-4. 非 Claude Code Agent 可填写客户端 Token；Token 只写入目标配置文件，不保存到 APISwitch 数据库。
+4. 选择“自动创建独立 Key”，或从客户端管理中手动选择已有 API Key。首次手动绑定时需输入一次明文进行哈希校验。
 5. 先点击“预览”，确认 Base URL、模型名、文件格式和目标路径。
 6. 点击“备份并写入”。软件会先备份原文件，再合并 APISwitch 配置。
 7. 出现问题时使用“恢复上次备份”。
 
-Claude Code 的客户端 Token 通过 `ANTHROPIC_AUTH_TOKEN` 环境变量注入。端口变化后，已启用的 Agent 配置会先备份，再更新网关地址。
+API Key 明文直接写入 Agent 所支持的配置字段。Claude Code 和 Langcli 的配置格式使用配置文件内部的 `env` 节，用户不需要设置 Windows 或 Shell 环境变量。端口变化后，已启用的 Agent 配置会先备份，再更新网关地址。
 
 ### 系统设置（高级页面）
 
@@ -404,13 +407,25 @@ Invoke-RestMethod `
 
 Files、Images、Audio、Embeddings、Moderations、Rerank、Search、Batches、WebSocket、Video 和 Music 也有统一网关入口；能否调用取决于统一模型声明、候选上游能力和协议可转换性。
 
+## Agent 配置
+
+“Agent 配置”支持为每个 Agent 选择一个默认模型和多个可用模型。API Key 可以自动创建为仅属于该 Agent 的独立 Key，也可以从“客户端管理”手动选择已有 Key。自动模式会把所选模型作为独立 Key 的允许列表；手动模式不会修改共享 Key 的模型权限，所选 Agent 模型必须已经得到该 Key 授权。数据库只保存哈希，因此首次手动绑定或更换 Key 时需要输入一次明文进行校验。明文直接写入目标配置文件。预览结果可以在页面中编辑，写入前会校验格式并备份原文件，自动模式也可以显式轮换独立 Key。
+
+Claude Code 和 Langcli 需要在各自配置文件的 `env` 节中引用密钥，这是客户端格式要求；APISwitch 会把明文同时写在同一配置文件中，用户不需要设置 Windows、Shell 或启动进程环境变量。Codex、OpenCode、OpenClaw、DeepSeek Harness、Hermes 和 Gemini CLI 同样直接写入各自支持的明文字段或请求头。
+
 ## 视觉和思考能力
 
 ### 视觉辅助
 
 当统一模型配置了视觉辅助工作流时，无视觉主模型收到图像后，可以先由视觉辅助模型生成文本描述，再把描述交给主模型。模型列表会根据有效能力返回 `vision`、`image-recognition` 和输入模态元数据，帮助支持这些字段的客户端识别视觉能力。
 
+DeepSeek Harness 不会从 OpenAI 模型列表推断图像输入能力。请在“Agent 配置”中选择 `DeepSeek Harness` 和需要使用的多个模型并写入配置；APISwitch 会备份并合并 `~/.dsh/settings.yaml`，为所选模型同步 `input`，写入供应商级 `defaultInput`，并通过明文 `Authorization` 请求头使用自动创建或手动选择的 Agent Key。这样切换模型后，`read_image` 仍能把图片交给视觉辅助工作流。
+
+工具调用是多轮能力：只要统一模型或候选声明能够输出 `tools`，APISwitch 就会自动视为能够接收下一轮 `tool_results`。旧配置无需手工补字段，Agent 执行文件检索等工具后不会再因该配对能力缺失而被本地能力检查拒绝。
+
 客户端仍可能只根据自己的内置模型数据库显示图标或筛选标签；这不代表网关没有返回能力。排查时应同时检查 `/v1/models` 响应和 APISwitch 调用日志中的辅助步骤。
+
+同一统一模型的多个候选都调用失败时，网关会返回 `all_upstream_candidates_failed`，并汇总各候选的供应商、模型和 HTTP 状态。额度不足（429）、模型/路由不存在（404）及协议方法不兼容（405）的候选会立即进入冷却，避免每次请求重复撞击已知不可用的上游。
 
 ### 思考模式
 

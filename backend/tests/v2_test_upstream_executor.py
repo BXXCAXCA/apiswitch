@@ -608,6 +608,59 @@ def test_runtime_upstream_failure_falls_through_candidates_of_same_unified_model
     assert any("运行时失败" in reason for item in log["candidate_summary"] for reason in item.get("reasons", []))
 
 
+def test_all_runtime_candidates_return_summary_and_cool_down_deterministic_failures(client: TestClient, monkeypatch):
+    attempted_models = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        attempted_models.append(model)
+        if model == "quota-candidate":
+            return httpx.Response(429, json={"error": {"message": "simulated quota exhausted"}})
+        return httpx.Response(405, json={"error": {"message": "simulated incompatible method"}})
+
+    monkeypatch.setattr(executor, "HTTP_TRANSPORT", httpx.MockTransport(upstream))
+    provider_id = _provider(client, "https://aggregate-failure.invalid/v1")
+    models = []
+    for model_id in ("quota-candidate", "method-candidate"):
+        models.append(client.post(
+            f"/api/admin/provider-instances/{provider_id}/upstream-models",
+            json={"model_id": model_id, "input_capabilities_json": ["text"], "output_capabilities_json": ["text"]},
+        ).json())
+    unified = client.post(
+        "/api/admin/unified-models",
+        json={"name": f"aggregate-failure-{uuid4().hex}", "enabled_protocols": ["openai_chat"], "combo_strategy": "priority"},
+    ).json()
+    for priority, model in enumerate(models, start=1):
+        client.post(
+            f"/api/admin/unified-models/{unified['id']}/candidates",
+            json={"upstream_model_id": model["id"], "priority": priority},
+        )
+    headers = _token(client)
+    payload = {"model": unified["name"], "messages": [{"role": "user", "content": "hello"}]}
+
+    response = client.post("/v1/chat/completions", headers=headers, json=payload)
+
+    assert response.status_code == 429, response.text
+    error = response.json()["error"]
+    assert error["type"] == "all_upstream_candidates_failed"
+    assert error["stage"] == "upstream_call"
+    assert error["details"]["failure_count"] == 2
+    assert error["details"]["status_counts"] == {"429": 1, "405": 1}
+    assert error["details"]["upstream_statuses"] == [405, 429]
+    attempts = error["details"]["attempts"]
+    assert [item["upstream_model"] for item in attempts] == ["quota-candidate", "method-candidate"]
+    assert [item["status_code"] for item in attempts] == [429, 405]
+    assert all(item["provider_name"] for item in attempts)
+    assert "candidates" not in error["details"]
+
+    breakers = client.get("/api/admin/router/status").json()["circuit_breakers"]
+    relevant = [row for row in breakers if row["upstream_model_id"] in {model["id"] for model in models}]
+    assert len(relevant) == 2 and all(row["state"] == "open" for row in relevant)
+    blocked = client.post("/v1/chat/completions", headers=headers, json=payload)
+    assert blocked.status_code == 503
+    assert attempted_models == ["quota-candidate", "method-candidate"]
+
+
 def test_one_gemini_call_falls_back_from_http_400_to_wrapped_openai_response(client:TestClient,monkeypatch):
     attempted_models=[]
     def upstream(request:httpx.Request)->httpx.Response:

@@ -224,23 +224,81 @@ describe('generation two product pages', () => {
     postMock.mockResolvedValue({ config_path: 'C:/Users/test/.codex/config.toml', content: 'model = "agent-all"', language: 'toml', token_hint: '不保存 Token' } as any)
     const wrapper = mountWithMessage(AgentsV2View)
     await flushPromises()
-    for (const label of ['Claude Code', 'Codex', 'OpenCode', '龙虾（OpenClaw）', 'Hermes', 'Gemini CLI', 'Langcli']) expect(wrapper.text()).toContain(label)
+    for (const label of ['Claude Code', 'Codex', 'OpenCode', '龙虾（OpenClaw）', 'DeepSeek Harness', 'Hermes', 'Gemini CLI', 'Langcli']) expect(wrapper.text()).toContain(label)
     const modelSelect: any = wrapper.findComponent('[data-testid="agent-main-model"]')
     expect(modelSelect.props('options')).toEqual([{ label: 'agent-all', value: 3 }])
     modelSelect.vm.$emit('update:value', 3)
+    const modelsSelect: any = wrapper.findComponent('[data-testid="agent-models"]')
+    expect(modelsSelect.props('multiple')).toBe(true)
+    modelsSelect.vm.$emit('update:value', [3])
     await wrapper.find('[data-testid="agent-preview"]').trigger('click')
     await flushPromises()
-    expect(postMock).toHaveBeenCalledWith('/api/admin/agents/codex/preview', expect.objectContaining({ main_model_id: 3 }))
+    expect(postMock).toHaveBeenCalledWith('/api/admin/agents/codex/preview', expect.objectContaining({ main_model_id: 3, model_ids: [3], api_token_mode: 'auto', rotate_api_key: false }))
     expect(wrapper.text()).toContain('C:/Users/test/.codex/config.toml')
+    const editor: any = wrapper.findComponent('[data-testid="agent-config-content"]')
+    expect(editor.exists()).toBe(true)
+    editor.vm.$emit('update:value', 'model = "agent-all"\n# 可编辑')
+    await wrapper.find('[data-testid="agent-write"]').trigger('click')
+    await flushPromises()
+    expect(postMock).toHaveBeenCalledWith('/api/admin/agents/codex/write', expect.objectContaining({ content: 'model = "agent-all"\n# 可编辑', model_ids: [3] }))
 
     const tabs: any = wrapper.findComponent('[data-testid="agent-tabs"]')
     tabs.vm.$emit('update:value', 'claude-code')
     await flushPromises()
     expect(wrapper.find('[data-testid="agent-opus-model"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="agent-api-token"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="agent-api-key-status"]').exists()).toBe(true)
     tabs.vm.$emit('update:value', 'langcli')
     await flushPromises()
-    expect(wrapper.find('[data-testid="agent-api-token"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agent-api-key-status"]').exists()).toBe(true)
+    tabs.vm.$emit('update:value', 'deepseek-harness')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="agent-api-key-status"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('明文 Authorization')
+    wrapper.unmount()
+    getMock.mockImplementation(async () => [] as any)
+    postMock.mockImplementation(async () => undefined as any)
+  })
+
+  it('lets an Agent select an existing API Key and submits its verified plaintext once', async () => {
+    const getMock = vi.mocked(getJson)
+    const postMock = vi.mocked(postJson)
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/unified-models') return [{ id: 3, name: 'agent-all', enabled: true, enabled_protocols: ['openai_responses'] }] as any
+      if (url === '/api/admin/tokens') return [{ id: 9, name: '共享客户端', prefix: 'ask_shared', scopes: ['gateway:invoke'], enabled: true, unified_model_ids: [3] }] as any
+      return [] as any
+    })
+    postMock.mockResolvedValue({ config_path: 'C:/Users/test/.codex/config.toml', content: 'experimental_bearer_token = "ask_shared_plaintext"', language: 'toml' } as any)
+
+    const wrapper = mountWithMessage(AgentsV2View)
+    await flushPromises()
+    const mainSelect: any = wrapper.findComponent('[data-testid="agent-main-model"]')
+    mainSelect.vm.$emit('update:value', 3)
+    const modelsSelect: any = wrapper.findComponent('[data-testid="agent-models"]')
+    modelsSelect.vm.$emit('update:value', [3])
+    const mode: any = wrapper.findComponent('[data-testid="agent-api-key-mode"]')
+    mode.vm.$emit('update:value', 'manual')
+    await flushPromises()
+
+    const tokenSelect: any = wrapper.findComponent('[data-testid="agent-existing-api-key"]')
+    expect(tokenSelect.props('options')).toEqual([{
+      label: '共享客户端 · ask_shared…', value: 9, disabled: false
+    }])
+    tokenSelect.vm.$emit('update:value', 9)
+    await flushPromises()
+    const plaintext: any = wrapper.findComponent('[data-testid="agent-existing-api-key-plain"]')
+    plaintext.vm.$emit('update:value', 'ask_shared_plaintext')
+    await wrapper.find('[data-testid="agent-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(postMock).toHaveBeenCalledWith('/api/admin/agents/codex/preview', expect.objectContaining({
+      main_model_id: 3,
+      model_ids: [3],
+      api_token_mode: 'manual',
+      api_token_id: 9,
+      api_token: 'ask_shared_plaintext',
+      rotate_api_key: false
+    }))
+    expect(wrapper.text()).toContain('手动 Key 的模型权限不会被 Agent 配置修改')
     wrapper.unmount()
     getMock.mockImplementation(async () => [] as any)
     postMock.mockImplementation(async () => undefined as any)
@@ -280,27 +338,113 @@ describe('generation two product pages', () => {
       label: '长名称供应商 / 完整模型显示名称 · namespace/extremely-long-upstream-model-name-that-must-remain-visible (#8)',
       value: 8
     }])
-    select.vm.$emit('update:value', 8)
+    expect(select.props('multiple')).toBe(true)
+    select.vm.$emit('update:value', [8])
     await flushPromises()
-    expect(wrapper.text()).toContain('当前选择：长名称供应商 / 完整模型显示名称 · namespace/extremely-long-upstream-model-name-that-must-remain-visible (#8)')
+    expect(wrapper.text()).toContain('已选 1 个：长名称供应商 / 完整模型显示名称 · namespace/extremely-long-upstream-model-name-that-must-remain-visible (#8)')
     expect(wrapper.find('.model-preview').attributes('title')).toContain('namespace/extremely-long-upstream-model-name-that-must-remain-visible')
     wrapper.unmount()
     getMock.mockImplementation(async () => [] as any)
   })
 
-  it('shows full auxiliary upstream names and inherits inferred capabilities', async () => {
+  it('bulk-configures selected upstream models from one shared form', async () => {
+    const getMock = vi.mocked(getJson)
+    const postMock = vi.mocked(postJson)
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/provider-instances') return [{ id: 4, name: '供应商 A', protocol_type: 'openai' }, { id: 5, name: '供应商 B', protocol_type: 'openai_compatible' }] as any
+      if (url === '/api/admin/upstream-models') return [
+        { id: 8, provider_instance_id: 4, provider_name: '供应商 A', model_id: 'model-a', display_name: '模型 A', input_capabilities_json: ['text'], output_capabilities_json: ['text'], context_window: 32000, max_output_tokens: 4096, input_price: 1, output_price: 2, cached_input_price: 0.5, tags_json: ['old'] },
+        { id: 9, provider_instance_id: 5, provider_name: '供应商 B', model_id: 'model-b', display_name: '模型 B', input_capabilities_json: ['text'], output_capabilities_json: ['text'] }
+      ] as any
+      return [] as any
+    })
+    postMock.mockResolvedValue({ updated: 2, action: 'configure' } as any)
+    const wrapper = mountWithMessage(ModelDiscoveryView)
+    await flushPromises()
+    const filter: any = wrapper.findComponent('[data-testid="model-list-provider-filter"]')
+    expect(filter.props('value')).toBe('all')
+    expect(filter.props('options')).toEqual([{ label: '全部供应商', value: 'all' }, { label: '供应商 A', value: 4 }, { label: '供应商 B', value: 5 }])
+    const table: any = wrapper.findComponent('[data-testid="upstream-model-table"]')
+    expect(table.props('data').map((row:any)=>row.provider_name)).toEqual(['供应商 A','供应商 B'])
+    expect(table.props('columns').some((column:any)=>column.title==='供应商')).toBe(true)
+    expect(table.props('scrollX')).toBe(1490)
+    expect(table.props('columns').find((column:any)=>column.key==='display_name')).toMatchObject({ width: 180, ellipsis: { tooltip: true } })
+    expect(table.props('columns').find((column:any)=>column.key==='caps')).toMatchObject({ width: 240, ellipsis: { tooltip: true } })
+    expect(table.props('columns').find((column:any)=>column.key==='actions')).toMatchObject({ width: 280, fixed: 'right' })
+    const search: any = wrapper.findComponent('[data-testid="model-id-search"]')
+    search.vm.$emit('update:value', 'MODEL-B')
+    await flushPromises()
+    expect(table.props('data').map((row:any)=>row.model_id)).toEqual(['model-b'])
+    search.vm.$emit('update:value', '')
+    await flushPromises()
+    table.vm.$emit('update:checkedRowKeys', [8, 9])
+    await flushPromises()
+    await wrapper.find('[data-testid="bulk-configure-button"]').trigger('click')
+    await flushPromises()
+    const panel = wrapper.find('[data-testid="bulk-configure-panel"]')
+    expect(panel.exists()).toBe(true)
+    const groups = panel.findAllComponents(CapabilityCheckboxGroup)
+    groups[0].vm.$emit('update:modelValue', ['text', 'vision'])
+    groups[1].vm.$emit('update:modelValue', ['text', 'tools'])
+    await wrapper.find('[data-testid="save-bulk-configuration"]').trigger('click')
+    await flushPromises()
+    expect(postMock).toHaveBeenCalledWith('/api/admin/upstream-models/bulk', {
+      ids: [8, 9],
+      action: 'configure',
+      configuration: expect.objectContaining({
+        input_capabilities_json: ['text', 'vision'],
+        output_capabilities_json: ['text', 'tools'],
+        context_window: 32000,
+        max_output_tokens: 4096,
+        tags_json: ['old']
+      })
+    })
+    wrapper.unmount()
+    postMock.mockClear()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
+  it('adds multiple upstream models to one unified model in a single request', async () => {
+    const getMock = vi.mocked(getJson)
+    const postMock = vi.mocked(postJson)
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/unified-models') return [{ id: 7, name: 'batch-target', candidates: [] }] as any
+      if (url === '/api/admin/provider-instances') return [{ id: 4, name: '供应商' }] as any
+      if (url === '/api/admin/provider-instances/4/upstream-models') return [
+        { id: 8, model_id: 'model-a', display_name: '模型 A' },
+        { id: 9, model_id: 'model-b', display_name: '模型 B' }
+      ] as any
+      return [] as any
+    })
+    postMock.mockResolvedValue([] as any)
+    const wrapper = mountWithMessage(UnifiedModelsView)
+    await flushPromises()
+    const select: any = wrapper.findComponent('[data-testid="candidate-upstream-select"]')
+    select.vm.$emit('update:value', [8, 9])
+    await flushPromises()
+    expect(wrapper.text()).toContain('批量添加 2 个候选')
+    await wrapper.find('[data-testid="save-candidates"]').trigger('click')
+    await flushPromises()
+    expect(postMock).toHaveBeenCalledWith('/api/admin/unified-models/7/candidates/bulk', {
+      upstream_model_ids: [8, 9],
+      weight: 100,
+      enabled: true,
+      capability_overrides: {}
+    })
+    wrapper.unmount()
+    postMock.mockClear()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
+  it('filters auxiliary upstream models by selected capabilities', async () => {
     const getMock = vi.mocked(getJson)
     getMock.mockImplementation(async (url: string) => {
       if (url === '/api/admin/auxiliary/settings') return { mode: 'global_pool' } as any
       if (url === '/api/admin/provider-instances') return [{ id: 4, name: '长名称供应商' }] as any
-      if (url === '/api/admin/provider-instances/4/upstream-models') return [{
-        id: 8,
-        provider_instance_id: 4,
-        model_id: 'namespace/extremely-long-vision-embedding-model-name',
-        display_name: '完整模型显示名称',
-        input_capabilities_json: ['text', 'vision'],
-        output_capabilities_json: ['text', 'embeddings']
-      }] as any
+      if (url === '/api/admin/provider-instances/4/upstream-models') return [
+        { id: 8, provider_instance_id: 4, model_id: 'namespace/extremely-long-vision-embedding-model-name', display_name: '完整模型显示名称', input_capabilities_json: ['text', 'vision'], output_capabilities_json: ['text', 'embeddings'] },
+        { id: 9, provider_instance_id: 4, model_id: 'audio-transcriber', display_name: '音频模型', input_capabilities_json: ['text', 'audio'], output_capabilities_json: ['text'] }
+      ] as any
       return [] as any
     })
     const wrapper = mountWithMessage(AuxiliaryModelsView)
@@ -308,12 +452,17 @@ describe('generation two product pages', () => {
     const select: any = wrapper.findComponent('[data-testid="aux-upstream-select"]')
     expect(select.props('consistentMenuWidth')).toBe(false)
     expect(typeof select.props('renderLabel')).toBe('function')
+    expect(select.props('options').map((option:any)=>option.value)).toEqual([8])
     select.vm.$emit('update:value', 8)
     await flushPromises()
     expect(wrapper.text()).toContain('当前选择：长名称供应商 / 完整模型显示名称 · namespace/extremely-long-vision-embedding-model-name')
-    expect(wrapper.text()).toContain('已根据上游模型的输入/输出能力自动识别')
     const capabilityGroup = wrapper.findAllComponents(CapabilityCheckboxGroup)[0]
-    expect(capabilityGroup.props('modelValue')).toEqual(['text', 'vision', 'embeddings'])
+    capabilityGroup.vm.$emit('update:modelValue', ['audio'])
+    await flushPromises()
+    expect(capabilityGroup.props('modelValue')).toEqual(['audio'])
+    expect(select.props('options').map((option:any)=>option.value)).toEqual([9])
+    expect(select.props('value')).toBeNull()
+    expect(wrapper.text()).toContain('原上游模型不具备全部所选能力，已自动清除')
     wrapper.unmount()
     getMock.mockImplementation(async () => [] as any)
   })

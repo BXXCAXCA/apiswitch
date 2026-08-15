@@ -5,6 +5,8 @@ from pathlib import Path
 import tomlkit
 import yaml
 from apiswitch import __version__
+from apiswitch.db.models import AgentConfig
+from apiswitch.db.session import SessionLocal
 from apiswitch.desktop import DesktopTray, _clear_runtime, _refresh_agents_for_port_change, _select_port, _write_runtime
 
 
@@ -90,6 +92,60 @@ def test_port_change_backs_up_and_refreshes_enabled_claude_config(client, tmp_pa
     ) == 0
 
 
+def test_port_change_upgrades_legacy_harness_with_independent_key_and_all_callable_models(client, tmp_path):
+    provider = client.post(
+        "/api/admin/provider-instances",
+        json={"name": "legacy-agent", "template_key": "openai", "base_url": "mock://legacy-agent"},
+    ).json()
+    upstream = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "legacy-upstream"},
+    ).json()
+    models = []
+    for name in ("legacy-main", "legacy-secondary"):
+        model = client.post(
+            "/api/admin/unified-models",
+            json={"name": name, "enabled_protocols": ["openai_chat"]},
+        ).json()
+        assert client.post(
+            f"/api/admin/unified-models/{model['id']}/candidates",
+            json={"upstream_model_id": upstream["id"]},
+        ).status_code == 201
+        models.append(model)
+
+    target = tmp_path / "legacy-dsh.yaml"
+    target.write_text(
+        "llm-pi-ai:\n  providers:\n    apiswitch:\n      apiKeyEnv: APISWITCH_API_KEY\n",
+        encoding="utf-8",
+    )
+    with SessionLocal() as db:
+        db.add(AgentConfig(
+            agent_type="deepseek-harness",
+            config_path=str(target),
+            enabled=True,
+            main_model_id=models[0]["id"],
+            last_written_base_url="http://127.0.0.1:8080",
+        ))
+        db.commit()
+
+    assert _refresh_agents_for_port_change(
+        "http://127.0.0.1:8080", "http://127.0.0.1:53421"
+    ) == 1
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    harness = document["llm-pi-ai"]["providers"]["apiswitch"]
+    assert "apiKeyEnv" not in harness
+    assert harness["headers"]["Authorization"].startswith("Bearer ask_")
+    assert "ask_agent_key_created_when_written" not in harness["headers"]["Authorization"]
+    assert {item["id"] for item in harness["models"]} == {item["name"] for item in models}
+
+    saved = client.get("/api/admin/agents").json()[0]
+    assert saved["api_token_id"] is not None
+    assert set(saved["model_ids"]) == {item["id"] for item in models}
+    tokens = client.get("/api/admin/tokens").json()
+    assert len(tokens) == 1
+    assert set(tokens[0]["unified_model_ids"]) == {item["id"] for item in models}
+
+
 def test_claude_config_maps_four_unified_models_and_restore_is_atomic(client,tmp_path,monkeypatch):
     models=[]
     for name in ("main","opus","sonnet","haiku"):
@@ -98,11 +154,13 @@ def test_claude_config_maps_four_unified_models_and_restore_is_atomic(client,tmp
     monkeypatch.setattr("apiswitch.desktop.runtime_info",lambda:{"base_url":"http://127.0.0.1:8080"})
     payload={"config_path":str(target),"main_model_id":models[0]["id"],"opus_model_id":models[1]["id"],"sonnet_model_id":models[2]["id"],"haiku_model_id":models[3]["id"]}
     preview=client.post("/api/admin/agents/claude-code/preview",json=payload).json()
-    assert preview["content"]["model"]=="agent-main"
-    assert preview["content"]["env"]=={
+    preview_content=json.loads(preview["content"])
+    assert preview_content["model"]=="agent-main"
+    assert preview_content["env"]=={
         "ANTHROPIC_BASE_URL":"http://127.0.0.1:8080",
         "ANTHROPIC_MODEL":"agent-main",
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1",
+        "ANTHROPIC_AUTH_TOKEN":"ask_agent_key_created_when_written",
         "ANTHROPIC_DEFAULT_OPUS_MODEL":"agent-opus",
         "ANTHROPIC_DEFAULT_SONNET_MODEL":"agent-sonnet",
         "ANTHROPIC_DEFAULT_HAIKU_MODEL":"agent-haiku",
@@ -121,7 +179,7 @@ def test_agent_write_rejects_path_outside_current_user_profile(client,monkeypatc
     assert response.status_code==422
 
 
-def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, monkeypatch):
+def test_agent_adapters_preview_merge_backup_and_write(client, tmp_path, monkeypatch):
     provider = client.post(
         "/api/admin/provider-instances",
         json={"name": "agent-vision", "template_key": "openai", "base_url": "mock://agent-vision"},
@@ -139,6 +197,11 @@ def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, mo
         json={"name": "agent-all", "enabled_protocols": ["openai_chat", "openai_responses", "gemini_v1beta"]},
     ).json()
     assert client.post(f"/api/admin/unified-models/{model['id']}/candidates", json={"upstream_model_id": main["id"]}).status_code == 201
+    second_model = client.post(
+        "/api/admin/unified-models",
+        json={"name": "agent-second", "enabled_protocols": ["openai_chat", "openai_responses", "gemini_v1beta"]},
+    ).json()
+    assert client.post(f"/api/admin/unified-models/{second_model['id']}/candidates", json={"upstream_model_id": main["id"]}).status_code == 201
     assert client.post("/api/admin/auxiliary/models", json={"upstream_model_id": helper["id"], "capabilities": ["vision"]}).status_code == 201
     assert client.post("/api/admin/auxiliary/workflows", json={"workflow_type": "vision_to_text", "input_capability": "vision", "output_capability": "text"}).status_code == 201
     monkeypatch.setattr("apiswitch.desktop.runtime_info", lambda: {"base_url": "http://127.0.0.1:8080"})
@@ -146,6 +209,7 @@ def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, mo
         "codex": tmp_path / "config.toml",
         "opencode": tmp_path / "opencode.json",
         "openclaw": tmp_path / "openclaw.json",
+        "deepseek-harness": tmp_path / "dsh-settings.yaml",
         "hermes": tmp_path / "config.yaml",
         "gemini-cli": tmp_path / ".env",
     }
@@ -153,17 +217,23 @@ def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, mo
         "codex": 'personality = "friendly"\n',
         "opencode": '{"autoupdate":false}',
         "openclaw": '{"gateway":{"port":18789}}',
+        "deepseek-harness": (
+            "locale:\n  preference: zh\n"
+            "llm-pi-ai:\n  providers:\n    apiswitch:\n      models:\n"
+            "        - id: agent-all\n          contextWindow: 12345\n          customFlag: keep-me\n"
+        ),
         "hermes": "terminal:\n  backend: local\n",
         "gemini-cli": "KEEP_ME=yes\n",
     }
     for agent_type, target in targets.items():
         target.write_text(initial[agent_type], encoding="utf-8")
-        payload = {"config_path": str(target), "main_model_id": model["id"], "api_token": "ask_agent_secret"}
+        payload = {"config_path": str(target), "main_model_id": model["id"], "model_ids": [model["id"], second_model["id"]]}
         preview = client.post(f"/api/admin/agents/{agent_type}/preview", json=payload)
         assert preview.status_code == 200, preview.text
-        assert "ask_agent_secret" not in preview.json()["content"]
+        assert "ask_agent_key_created_when_written" in preview.json()["content"]
         written = client.post(f"/api/admin/agents/{agent_type}/write", json=payload)
         assert written.status_code == 200, written.text
+        assert written.json()["api_token_created"] is True
         assert Path(written.json()["backup_path"]).read_text(encoding="utf-8") == initial[agent_type]
 
     codex = tomlkit.parse(targets["codex"].read_text(encoding="utf-8"))
@@ -171,24 +241,163 @@ def test_five_agent_adapters_preview_merge_backup_and_write(client, tmp_path, mo
     assert codex["model_providers"]["apiswitch"]["base_url"] == "http://127.0.0.1:8080/v1"
     opencode = json.loads(targets["opencode"].read_text(encoding="utf-8"))
     assert opencode["autoupdate"] is False and opencode["model"] == "apiswitch/agent-all"
-    assert opencode["provider"]["apiswitch"]["options"]["apiKey"] == "ask_agent_secret"
+    assert opencode["provider"]["apiswitch"]["options"]["apiKey"].startswith("ask_")
     opencode_model = opencode["provider"]["apiswitch"]["models"]["agent-all"]
     assert opencode_model["attachment"] is True
     assert opencode_model["tool_call"] is True
     assert opencode_model["modalities"] == {"input": ["text", "image"], "output": ["text"]}
+    assert set(opencode["provider"]["apiswitch"]["models"]) == {"agent-all", "agent-second"}
     openclaw = json.loads(targets["openclaw"].read_text(encoding="utf-8"))
     assert openclaw["gateway"]["port"] == 18789
     assert openclaw["agents"]["defaults"]["model"]["primary"] == "apiswitch/agent-all"
     assert openclaw["models"]["providers"]["apiswitch"]["models"][-1]["input"] == ["text", "image"]
+    harness = yaml.safe_load(targets["deepseek-harness"].read_text(encoding="utf-8"))
+    assert harness["locale"]["preference"] == "zh"
+    harness_provider = harness["llm-pi-ai"]["providers"]["apiswitch"]
+    assert harness_provider["baseURL"] == "http://127.0.0.1:8080/v1"
+    assert harness_provider["headers"]["Authorization"].startswith("Bearer ask_")
+    assert "apiKeyEnv" not in harness_provider
+    harness_models = {item["id"]: item for item in harness_provider["models"]}
+    assert set(harness_models) == {"agent-all", "agent-second"}
+    assert harness_provider["defaultInput"] == ["text", "image"]
+    assert all(item["input"] == ["text", "image"] for item in harness_models.values())
+    assert harness_models["agent-all"]["contextWindow"] == 12345
+    assert harness_models["agent-all"]["customFlag"] == "keep-me"
+    assert harness["agent-default-model"] == {"provider": "apiswitch", "model": "agent-all"}
     hermes = yaml.safe_load(targets["hermes"].read_text(encoding="utf-8"))
     assert hermes["terminal"]["backend"] == "local" and hermes["model"]["provider"] == "custom"
     gemini = targets["gemini-cli"].read_text(encoding="utf-8")
     assert "KEEP_ME=yes" in gemini and "GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8080" in gemini
-    assert "GEMINI_MODEL=agent-all" in gemini and "GEMINI_API_KEY=ask_agent_secret" in gemini
+    assert "GEMINI_MODEL=agent-all" in gemini and "GEMINI_API_KEY=ask_" in gemini
 
-    assert _refresh_agents_for_port_change("http://127.0.0.1:8080", "http://127.0.0.1:53421") == 5
+    saved_agents=client.get("/api/admin/agents").json()
+    assert len({item["api_token_id"] for item in saved_agents})==6
+    assert all(item["model_ids"]==[model["id"],second_model["id"]] for item in saved_agents)
+    token_rows=client.get("/api/admin/tokens").json()
+    assert len(token_rows)==6
+    assert all(set(item["unified_model_ids"])=={model["id"],second_model["id"]} for item in token_rows)
+
+    assert _refresh_agents_for_port_change("http://127.0.0.1:8080", "http://127.0.0.1:53421") == 6
     assert "http://127.0.0.1:53421" in targets["gemini-cli"].read_text(encoding="utf-8")
     assert "http://127.0.0.1:53421/v1" in targets["codex"].read_text(encoding="utf-8")
+
+
+def test_agent_config_content_is_editable_and_key_rotation_keeps_one_bound_token(client,tmp_path,monkeypatch):
+    model=client.post(
+        "/api/admin/unified-models",
+        json={"name":"editable-agent","enabled_protocols":["openai_chat"]},
+    ).json()
+    target=tmp_path/"opencode.json"
+    monkeypatch.setattr("apiswitch.desktop.runtime_info",lambda:{"base_url":"http://127.0.0.1:8080"})
+    payload={"config_path":str(target),"main_model_id":model["id"],"model_ids":[model["id"]]}
+
+    preview=client.post("/api/admin/agents/opencode/preview",json=payload).json()
+    editable=json.loads(preview["content"])
+    editable["userEdited"]={"keep":True}
+    first=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**payload,"content":json.dumps(editable,ensure_ascii=False)},
+    )
+    assert first.status_code==200,first.text
+    first_prefix=first.json()["api_token_prefix"]
+    written=json.loads(target.read_text(encoding="utf-8"))
+    first_plain=written["provider"]["apiswitch"]["options"]["apiKey"]
+    assert first_plain.startswith("ask_") and written["userEdited"]=={"keep":True}
+
+    existing=client.post("/api/admin/agents/opencode/preview",json=payload).json()
+    assert first_plain in existing["content"]
+    unchanged=client.post("/api/admin/agents/opencode/write",json={**payload,"content":existing["content"]})
+    assert unchanged.status_code==200 and unchanged.json()["api_token_prefix"]==first_prefix
+    assert len(client.get("/api/admin/tokens").json())==1
+
+    rotated_preview=client.post("/api/admin/agents/opencode/preview",json={**payload,"rotate_api_key":True}).json()
+    assert "ask_agent_key_created_when_written" in rotated_preview["content"]
+    rotated=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**payload,"rotate_api_key":True,"content":rotated_preview["content"]},
+    )
+    assert rotated.status_code==200,rotated.text
+    assert rotated.json()["api_token_prefix"]!=first_prefix
+    rotated_plain=json.loads(target.read_text(encoding="utf-8"))["provider"]["apiswitch"]["options"]["apiKey"]
+    assert rotated_plain.startswith("ask_") and rotated_plain!=first_plain
+    assert len(client.get("/api/admin/tokens").json())==1
+
+    before=target.read_text(encoding="utf-8")
+    malformed=client.post("/api/admin/agents/opencode/write",json={**payload,"content":"{"})
+    assert malformed.status_code==422 and target.read_text(encoding="utf-8")==before
+
+
+def test_agent_can_select_an_existing_api_key_without_changing_its_model_permissions(client,tmp_path,monkeypatch):
+    models=[]
+    for name in ("manual-agent-main","manual-agent-shared"):
+        models.append(client.post(
+            "/api/admin/unified-models",
+            json={"name":name,"enabled_protocols":["openai_chat"]},
+        ).json())
+    existing=client.post(
+        "/api/admin/tokens",
+        json={
+            "name":"手动选择的客户端 Key",
+            "scopes":["gateway:invoke"],
+            "unified_model_ids":[item["id"] for item in models],
+        },
+    ).json()
+    target=tmp_path/"manual-opencode.json"
+    monkeypatch.setattr("apiswitch.desktop.runtime_info",lambda:{"base_url":"http://127.0.0.1:8080"})
+    payload={
+        "config_path":str(target),
+        "main_model_id":models[0]["id"],
+        "model_ids":[models[0]["id"]],
+        "api_token_mode":"manual",
+        "api_token_id":existing["id"],
+        "api_token":existing["token"],
+    }
+
+    preview=client.post("/api/admin/agents/opencode/preview",json=payload)
+    assert preview.status_code==200,preview.text
+    assert existing["token"] in preview.json()["content"]
+    written=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**payload,"content":preview.json()["content"]},
+    )
+    assert written.status_code==200,written.text
+    assert written.json()["api_token_mode"]=="manual"
+    assert written.json()["api_token_id"]==existing["id"]
+    assert written.json()["api_token_created"] is False
+
+    saved=client.get("/api/admin/agents").json()[0]
+    assert saved["api_token_mode"]=="manual"
+    assert saved["api_token_id"]==existing["id"]
+    assert saved["api_token_name"]=="手动选择的客户端 Key"
+    tokens=client.get("/api/admin/tokens").json()
+    assert len(tokens)==1
+    assert set(tokens[0]["unified_model_ids"])=={item["id"] for item in models}
+
+    # Once bound, the plaintext is preserved from the target config and does
+    # not need to be pasted again. A supplied wrong plaintext is still rejected.
+    without_plain={key:value for key,value in payload.items() if key!="api_token"}
+    assert client.post("/api/admin/agents/opencode/preview",json=without_plain).status_code==200
+    wrong=client.post("/api/admin/agents/opencode/preview",json={**payload,"api_token":"ask_wrong_manual_key"})
+    assert wrong.status_code==422
+    assert "不匹配" in wrong.text
+
+    # Switching back to automatic mode creates a new independent token and
+    # leaves the manually selected shared token untouched.
+    automatic={
+        "config_path":str(target),
+        "main_model_id":models[0]["id"],
+        "model_ids":[models[0]["id"]],
+        "api_token_mode":"auto",
+    }
+    auto_preview=client.post("/api/admin/agents/opencode/preview",json=automatic).json()
+    auto_write=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**automatic,"content":auto_preview["content"]},
+    )
+    assert auto_write.status_code==200,auto_write.text
+    assert auto_write.json()["api_token_mode"]=="auto"
+    assert auto_write.json()["api_token_id"]!=existing["id"]
+    assert len(client.get("/api/admin/tokens").json())==2
 
 
 def test_agent_adapter_rejects_a_model_without_required_protocol(client, tmp_path, monkeypatch):

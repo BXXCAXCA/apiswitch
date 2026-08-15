@@ -287,6 +287,11 @@ def _protocol_error_status(exc:ProtocolError)->int:
     try:upstream_status=int(details.get("status_code") or 0)
     except (TypeError,ValueError):upstream_status=0
     if upstream_status==429:return 429
+    if exc.error_type=="all_upstream_candidates_failed":
+        statuses={int(value) for value in details.get("upstream_statuses",[]) if str(value).isdigit()}
+        if 429 in statuses:return 429
+        if 408 in statuses:return 504
+        return 502
     if cause=="provider_timeout":return 504
     if cause=="provider_unavailable":return 503
     if cause=="upstream_http_error" and upstream_status>=500:return 502

@@ -1020,9 +1020,14 @@ def _replace_vision_content(messages:list[dict[str,Any]], description:str)->list
     return replaced
 
 
+def _circuit_breaker(db:Session,upstream_model_id:int)->CircuitBreaker:
+    pending=next((row for row in db.new if isinstance(row,CircuitBreaker) and row.upstream_model_id==upstream_model_id),None)
+    return pending or db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==upstream_model_id)) or CircuitBreaker(upstream_model_id=upstream_model_id)
+
+
 def _health(db:Session,candidate:RouteCandidate,success:bool,latency_ms:float,error:str|None=None,trip_breaker:bool=True)->None:
     row=db.scalar(select(ProviderHealth).where(ProviderHealth.upstream_model_id==candidate.upstream.id)) or ProviderHealth(upstream_model_id=candidate.upstream.id)
-    breaker=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==candidate.upstream.id)) or CircuitBreaker(upstream_model_id=candidate.upstream.id)
+    breaker=_circuit_breaker(db,candidate.upstream.id)
     if success:
         row.success_count=(row.success_count or 0)+1;row.last_success_at=utc_now();row.avg_latency_ms=latency_ms if row.avg_latency_ms is None else (row.avg_latency_ms*0.8+latency_ms*0.2)
         breaker.state="closed";breaker.opened_at=None;breaker.half_open_at=None;breaker.consecutive_failures=0
@@ -1049,11 +1054,59 @@ def _trips_breaker(exc:ProtocolError)->bool:
 
 
 def _open_breaker_immediately(db:Session,candidate:RouteCandidate)->None:
-    """Skip a rate-limited auxiliary upstream for its configured cooldown."""
-    breaker=db.scalar(select(CircuitBreaker).where(CircuitBreaker.upstream_model_id==candidate.upstream.id)) or CircuitBreaker(upstream_model_id=candidate.upstream.id)
+    """Skip a deterministically unusable upstream for its configured cooldown."""
+    breaker=_circuit_breaker(db,candidate.upstream.id)
     breaker.state="open";breaker.opened_at=utc_now();breaker.half_open_at=None
     breaker.consecutive_failures=max(breaker.consecutive_failures or 0,breaker.failure_threshold or 3)
     db.add(breaker)
+
+
+def _requires_immediate_cooldown(exc:ProtocolError)->bool:
+    """Avoid retrying quota exhaustion and broken model/protocol routes per request."""
+    if exc.error_type!="upstream_http_error":return False
+    return int(exc.details.get("status_code") or 0) in {404,405,429}
+
+
+def _all_candidate_error(last_error:ProtocolError,explanation:list[dict[str,Any]])->ProtocolError:
+    """Summarize a failed fallback chain instead of exposing only its final error."""
+    failures=[item for item in explanation if item.get("stage")]
+    if len(failures)<=1:
+        return ProtocolError(last_error.error_type,str(last_error),last_error.stage,{**last_error.details,"candidates":explanation})
+    status_counts:dict[str,int]={};error_counts:dict[str,int]={};attempts=[]
+    for item in failures:
+        details=item.get("details") if isinstance(item.get("details"),dict) else {}
+        status=details.get("status_code")
+        if status is not None:
+            key=str(status);status_counts[key]=status_counts.get(key,0)+1
+        reason=(item.get("reasons") or ["运行时失败：unknown"])[0]
+        error_type=str(reason).removeprefix("运行时失败：")
+        error_counts[error_type]=error_counts.get(error_type,0)+1
+        attempt={
+            "candidate_id":item.get("candidate_id"),
+            "provider_instance_id":item.get("provider_instance_id"),
+            "provider_name":item.get("provider_name"),
+            "upstream_model_id":item.get("upstream_model_id"),
+            "upstream_model":item.get("upstream_model"),
+            "error_type":error_type,
+            "stage":item.get("stage"),
+        }
+        for key in ("status_code","upstream_error_code"):
+            if details.get(key) is not None:attempt[key]=details[key]
+        upstream_message=details.get("upstream_error_message")
+        if upstream_message:attempt["upstream_error_message"]=str(upstream_message)[:300]
+        attempts.append(attempt)
+    statuses={int(value) for value in status_counts}
+    representative_status=429 if 429 in statuses else 408 if 408 in statuses else max(statuses,default=0)
+    details={
+        "cause":"all_upstream_candidates_failed",
+        "failure_count":len(failures),
+        "status_counts":status_counts,
+        "error_counts":error_counts,
+        "upstream_statuses":sorted(statuses),
+        "attempts":attempts,
+    }
+    if representative_status:details["status_code"]=representative_status
+    return ProtocolError("all_upstream_candidates_failed","统一模型的全部候选调用失败","upstream_call",details)
 
 
 def _budgets(db:Session,request:CanonicalRequest,unified:UnifiedModel,api_token_id:int|None,provider_id:int|None=None,upstream_model_id:int|None=None)->list[Budget]:
@@ -1101,10 +1154,12 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
                 first_token_latency_ms=(time.perf_counter()-clock)*1000
                 _health(db,candidate,True,latency);break
             except ProtocolError as exc:
-                last_error=exc;_health(db,candidate,False,(time.perf_counter()-attempt)*1000,str(exc),_trips_breaker(exc));explanation.append({"candidate_id":candidate.candidate.id,"upstream_model_id":candidate.upstream.id,"provider_instance_id":candidate.provider.id,"eligible":False,"reasons":[f"运行时失败：{exc.error_type}"],"stage":exc.stage,"details":exc.details})
+                last_error=exc;_health(db,candidate,False,(time.perf_counter()-attempt)*1000,str(exc),_trips_breaker(exc))
+                if _requires_immediate_cooldown(exc):_open_breaker_immediately(db,candidate)
+                explanation.append({"candidate_id":candidate.candidate.id,"upstream_model_id":candidate.upstream.id,"upstream_model":candidate.upstream.model_id,"provider_instance_id":candidate.provider.id,"provider_name":candidate.provider.name,"eligible":False,"reasons":[f"运行时失败：{exc.error_type}"],"stage":exc.stage,"details":exc.details})
         else:
             if last_error:
-                raise ProtocolError(last_error.error_type,str(last_error),last_error.stage,{**last_error.details,"candidates":explanation})
+                raise _all_candidate_error(last_error,explanation)
             raise ProtocolError("provider_unavailable","统一模型的全部候选调用失败","upstream_call",{"candidates":explanation})
         if any(step.get("workflow_type")=="structured_repair" for step in auxiliary.get("steps",[])):
             request,repaired=await _run_auxiliary_steps(db,request,auxiliary,parent_request_id=request_id,api_token_id=api_token_id,token_prefix_snapshot=token_prefix_snapshot,post_response=response);response=repaired or response

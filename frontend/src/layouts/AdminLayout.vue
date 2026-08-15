@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref } from 'vue'
+import { h, onMounted, ref } from 'vue'
 import { NButton, NLayout, NLayoutContent, NLayoutSider, NMenu } from 'naive-ui'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { productNavigation } from '../navigation'
@@ -34,6 +34,7 @@ const collapsed = ref(localStorage.getItem('apiswitch.sidebar.collapsed') === '1
 const menuOptions = productNavigation.map(({ label, path }) => ({ label: () => h(RouterLink, { to: path }, { default: () => label }), key: path }))
 function navigate(path: string) { router.push(path) }
 function saveCollapsed(value: boolean) { localStorage.setItem('apiswitch.sidebar.collapsed', value ? '1' : '0') }
+onMounted(()=>{if(window.matchMedia('(max-width:700px)').matches)collapsed.value=true})
 </script>
 
 <style scoped>
@@ -41,4 +42,5 @@ function saveCollapsed(value: boolean) { localStorage.setItem('apiswitch.sidebar
 .brand{font-size:28px;font-weight:700;white-space:nowrap}
 .main-shell{min-width:0;flex:1;height:100vh;overflow:hidden;background:#f5f7f9}
 .content{height:100%;overflow-y:auto;padding:24px 30px 40px;box-sizing:border-box}
+@media (max-width:700px){.content{padding:16px 12px 28px}}
 </style>

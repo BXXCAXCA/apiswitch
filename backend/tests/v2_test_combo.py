@@ -103,6 +103,22 @@ def test_unified_capability_declaration_is_a_contract_not_a_per_request_filter(c
         else:raise AssertionError("capabilities outside the unified contract must be rejected")
 
 
+def test_tools_output_implies_tool_results_input_for_saved_contract_and_discovery(client):
+    provider=client.post("/api/admin/provider-instances",json={"name":f"tool-contract-{uuid4().hex}","template_key":"openai","base_url":"mock://tool-contract"}).json()
+    upstream=client.post(f"/api/admin/provider-instances/{provider['id']}/upstream-models",json={"model_id":"tool-contract-model","input_capabilities_json":["text"],"output_capabilities_json":["text","tools"]}).json()
+    unified=client.post("/api/admin/unified-models",json={
+        "name":f"tool-contract-{uuid4().hex}",
+        "enabled_protocols":["openai_chat"],
+        "required_capabilities":{"input":["text"],"output":["text","tools"]},
+    }).json()
+    client.post(f"/api/admin/unified-models/{unified['id']}/candidates",json={"upstream_model_id":upstream["id"]})
+    request=CanonicalRequest("chat","openai_chat",unified["name"],messages=[{"role":"tool","content":"result"}],required_input=["text","tool_results"],required_output=["text"])
+    with SessionLocal() as db:
+        row=db.get(UnifiedModel,unified["id"])
+        assert engine.route_candidates(db,request)[1][0].upstream.id==upstream["id"]
+        assert "tool_results" in engine.effective_unified_capabilities(db,row)["input"]
+
+
 def test_unified_model_context_latency_and_cost_constraints_filter_candidates(client):
     unified_data,upstreams,_=_combo_fixture(client)
     request=CanonicalRequest("chat","openai_chat",unified_data["name"],messages=[{"role":"user","content":"x"}],parameters={"max_tokens":1})

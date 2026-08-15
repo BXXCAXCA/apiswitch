@@ -52,6 +52,18 @@ def _caps(upstream: UpstreamModel, candidate: UnifiedModelCandidate) -> set[str]
     return capabilities
 
 
+def _complete_tool_contract(inputs: set[str], outputs: set[str]) -> None:
+    """Apply capability dependencies shared by discovery and validation.
+
+    Tool calling is a multi-turn contract: after a model emits a tool call, the
+    same route must accept the corresponding result.  Older saved model
+    declarations often listed only the output side, so treat ``tool_results``
+    as implied instead of rejecting the follow-up turn.
+    """
+    if "tools" in outputs:
+        inputs.add("tool_results")
+
+
 def _provider_protocol_supports(provider: ProviderInstance, request: CanonicalRequest) -> bool:
     if provider.protocol_type in {"openai", "openai_compatible"}:
         return request.request_type in {"chat", "embeddings", "images", "audio", "moderations", "rerank", "search", "batches", "video", "music"}
@@ -109,6 +121,7 @@ def effective_unified_capabilities(db: Session, unified: UnifiedModel) -> dict[s
         inputs.add(workflow.input_capability)
         outputs.add(workflow.output_capability)
 
+    _complete_tool_contract(inputs, outputs)
     inputs.add("text")
     outputs.add("text")
     return {"input": sorted(inputs), "output": sorted(outputs)}
@@ -126,6 +139,7 @@ def route_candidates(db: Session, request: CanonicalRequest) -> tuple[UnifiedMod
     declared=unified.required_capabilities_json or {}
     declared_input=set(declared.get("input",[])) if isinstance(declared,dict) else set()
     declared_output=set(declared.get("output",[])) if isinstance(declared,dict) else set()
+    _complete_tool_contract(declared_input, declared_output)
     # Text is the baseline capability advertised by model discovery and must
     # remain callable even when an older client saved only an added modality
     # such as vision in the explicit declaration.

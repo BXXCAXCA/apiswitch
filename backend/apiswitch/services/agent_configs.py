@@ -15,16 +15,28 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apiswitch.db.models import AgentConfig, UnifiedModel, UnifiedModelCandidate, UpstreamModel
+from apiswitch.db.models import (
+    AgentConfig,
+    ApiToken,
+    ApiTokenUnifiedModel,
+    ProviderInstance,
+    UnifiedModel,
+    UnifiedModelCandidate,
+    UpstreamModel,
+)
 from apiswitch.routing.model_catalog import model_catalog_metadata
+from apiswitch.security.tokens import generate_api_token, hash_api_token, token_prefix
 
 MODEL_FIELDS = ("main_model_id", "opus_model_id", "sonnet_model_id", "haiku_model_id")
+AGENT_TOKEN_PLACEHOLDER = "ask_agent_key_created_when_written"
+_AGENT_TOKEN_PATTERN = re.compile(r"ask_[A-Za-z0-9_-]{8,}")
 _SCHEMA_URL = "https://json.schemastore.org/claude-code-settings.json"
 AGENT_SPECS: dict[str, dict[str, str]] = {
     "claude-code": {"label": "Claude Code", "path": ".claude/settings.json", "protocol": "anthropic_messages", "language": "json"},
     "codex": {"label": "Codex", "path": ".codex/config.toml", "protocol": "openai_responses", "language": "toml"},
     "opencode": {"label": "OpenCode", "path": ".config/opencode/opencode.json", "protocol": "openai_chat", "language": "json"},
     "openclaw": {"label": "龙虾（OpenClaw）", "path": ".openclaw/openclaw.json", "protocol": "openai_chat", "language": "json"},
+    "deepseek-harness": {"label": "DeepSeek Harness", "path": ".dsh/settings.yaml", "protocol": "openai_chat", "language": "yaml"},
     "hermes": {"label": "Hermes Agent", "path": ".hermes/config.yaml", "protocol": "openai_chat", "language": "yaml"},
     "gemini-cli": {"label": "Gemini CLI", "path": ".gemini/.env", "protocol": "gemini_v1beta", "language": "shell"},
     "langcli": {"label": "Langcli", "path": ".langcli/settings.json", "protocol": "openai_chat", "language": "json"},
@@ -60,6 +72,18 @@ def _model(db: Session, model_id: int | None, required_protocol: str) -> Unified
     return row
 
 
+def _selected_models(
+    db: Session,
+    main_model_id: int | None,
+    model_ids: list[int] | None,
+    required_protocol: str,
+) -> tuple[UnifiedModel, list[UnifiedModel]]:
+    main = _model(db, main_model_id, required_protocol)
+    ids = list(dict.fromkeys([main.id, *(model_ids or [])]))
+    models = [_model(db, model_id, required_protocol) for model_id in ids]
+    return main, models
+
+
 def _openclaw_model(db: Session, model: UnifiedModel) -> dict[str, Any]:
     upstreams = db.scalars(
         select(UpstreamModel)
@@ -78,6 +102,26 @@ def _openclaw_model(db: Session, model: UnifiedModel) -> dict[str, Any]:
         "contextWindow": context,
         "maxTokens": max_tokens,
     }
+
+
+def _callable_agent_models(db: Session, required_protocol: str) -> list[UnifiedModel]:
+    """Return enabled unified models with at least one callable upstream route."""
+    rows = db.scalars(
+        select(UnifiedModel)
+        .join(UnifiedModelCandidate, UnifiedModelCandidate.unified_model_id == UnifiedModel.id)
+        .join(UpstreamModel, UpstreamModel.id == UnifiedModelCandidate.upstream_model_id)
+        .join(ProviderInstance, ProviderInstance.id == UpstreamModel.provider_instance_id)
+        .where(
+            UnifiedModel.enabled.is_(True),
+            UnifiedModelCandidate.enabled.is_(True),
+            UpstreamModel.enabled.is_(True),
+            UpstreamModel.remote_status != "missing",
+            ProviderInstance.enabled.is_(True),
+        )
+        .distinct()
+        .order_by(UnifiedModel.name)
+    ).all()
+    return [row for row in rows if required_protocol in (row.enabled_protocols_json or [])]
 
 
 def _load_json5(text: str) -> dict[str, Any]:
@@ -123,13 +167,14 @@ def agent_content(
     main_model_id: int | None,
     base_url: str,
     *,
+    model_ids: list[int] | None = None,
     existing_text: str = "",
     api_token: str | None = None,
 ) -> str:
     spec = AGENT_SPECS.get(agent_type)
     if not spec:
         raise ValueError("不支持的 Agent 类型")
-    model = _model(db, main_model_id, spec["protocol"])
+    model, selected_models = _selected_models(db, main_model_id, model_ids, spec["protocol"])
     token = api_token.strip() if isinstance(api_token, str) and api_token.strip() else None
 
     if agent_type == "codex":
@@ -145,11 +190,11 @@ def agent_content(
             provider = tomlkit.table()
             providers["apiswitch"] = provider
         provider.update({"name": "APISwitch", "base_url": _gateway_url(base_url, openai=True), "wire_api": "responses", "requires_openai_auth": False})
+        provider.pop("env_key", None)
         if token:
-            provider.pop("env_key", None)
             provider["experimental_bearer_token"] = token
         elif not provider.get("experimental_bearer_token"):
-            provider["env_key"] = "APISWITCH_API_KEY"
+            provider["experimental_bearer_token"] = AGENT_TOKEN_PLACEHOLDER
         return tomlkit.dumps(document)
 
     if agent_type == "opencode":
@@ -159,15 +204,16 @@ def agent_content(
         provider = providers.get("apiswitch") if isinstance(providers.get("apiswitch"), dict) else {}
         options = provider.get("options") if isinstance(provider.get("options"), dict) else {}
         options["baseURL"] = _gateway_url(base_url, openai=True)
-        options["apiKey"] = token or options.get("apiKey") or "{env:APISWITCH_API_KEY}"
-        models = provider.get("models") if isinstance(provider.get("models"), dict) else {}
-        metadata = model_catalog_metadata(db, model)
-        models[model.name] = {
-            "name": model.name,
-            "attachment": "image" in metadata["input_modalities"],
-            "tool_call": "tools" in metadata["capabilities"],
-            "modalities": metadata["modalities"],
-        }
+        options["apiKey"] = token or options.get("apiKey") or AGENT_TOKEN_PLACEHOLDER
+        models = {}
+        for selected in selected_models:
+            metadata = model_catalog_metadata(db, selected)
+            models[selected.name] = {
+                "name": selected.name,
+                "attachment": "image" in metadata["input_modalities"],
+                "tool_call": "tools" in metadata["capabilities"],
+                "modalities": metadata["modalities"],
+            }
         provider.update({"npm": "@ai-sdk/openai-compatible", "name": "APISwitch", "options": options, "models": models})
         providers["apiswitch"] = provider
         document["model"] = f"apiswitch/{model.name}"
@@ -179,13 +225,10 @@ def agent_content(
         models_root["mode"] = "merge"
         providers = _nested_dict(models_root, "providers")
         provider = providers.get("apiswitch") if isinstance(providers.get("apiswitch"), dict) else {}
-        prior_models = provider.get("models") if isinstance(provider.get("models"), list) else []
-        descriptor = _openclaw_model(db, model)
-        provider_models = [item for item in prior_models if isinstance(item, dict) and item.get("id") != model.name]
-        provider_models.append(descriptor)
+        provider_models = [_openclaw_model(db, selected) for selected in selected_models]
         provider.update({
             "baseUrl": _gateway_url(base_url, openai=True),
-            "apiKey": token or provider.get("apiKey") or {"source": "env", "provider": "default", "id": "APISWITCH_API_KEY"},
+            "apiKey": token or (provider.get("apiKey") if isinstance(provider.get("apiKey"), str) else None) or AGENT_TOKEN_PLACEHOLDER,
             "api": "openai-completions",
             "models": provider_models,
         })
@@ -195,6 +238,56 @@ def agent_content(
         primary["primary"] = f"apiswitch/{model.name}"
         defaults["model"] = primary
         return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
+
+    if agent_type == "deepseek-harness":
+        parsed = yaml.safe_load(existing_text) if existing_text.strip() else {}
+        document = parsed if isinstance(parsed, dict) else {}
+        llm = document.get("llm-pi-ai") if isinstance(document.get("llm-pi-ai"), dict) else {}
+        providers = llm.get("providers") if isinstance(llm.get("providers"), dict) else {}
+        provider = providers.get("apiswitch") if isinstance(providers.get("apiswitch"), dict) else {}
+        prior_models = provider.get("models") if isinstance(provider.get("models"), list) else []
+        existing_by_id = {
+            item.get("id"): item
+            for item in prior_models
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        }
+        provider_models=[]
+        for catalog_model in selected_models:
+            base_descriptor = _openclaw_model(db, catalog_model)
+            existing_descriptor = existing_by_id.get(catalog_model.name, {})
+            provider_models.append({
+                **existing_descriptor,
+                "id": catalog_model.name,
+                "name": existing_descriptor.get("name") or catalog_model.name,
+                # Harness intentionally ignores modality extensions returned by
+                # OpenAI model discovery.  Each entry therefore needs an input
+                # declaration before read_image will attach an image.
+                "input": [item for item in base_descriptor["input"] if item in {"text", "image"}],
+                "contextWindow": existing_descriptor.get("contextWindow") or base_descriptor["contextWindow"],
+                "maxTokens": existing_descriptor.get("maxTokens") or base_descriptor["maxTokens"],
+            })
+        common_inputs = set(provider_models[0]["input"])
+        for descriptor in provider_models[1:]:common_inputs.intersection_update(descriptor["input"])
+        headers = provider.get("headers") if isinstance(provider.get("headers"), dict) else {}
+        existing_auth = headers.get("Authorization") if isinstance(headers.get("Authorization"), str) else None
+        headers["Authorization"] = f"Bearer {token}" if token else existing_auth or f"Bearer {AGENT_TOKEN_PLACEHOLDER}"
+        provider.pop("apiKeyEnv", None)
+        provider.update({
+            "displayName": "APISwitch",
+            "api": "openai-completions",
+            "baseURL": _gateway_url(base_url, openai=True),
+            # This fallback survives Harness's "fetch models" action, which
+            # recreates catalog rows without their per-model modality fields.
+            "defaultInput": [item for item in ("text", "image") if item in common_inputs],
+            "headers": headers,
+            "models": provider_models,
+        })
+        providers["apiswitch"] = provider
+        llm["providers"] = providers
+        document["llm-pi-ai"] = llm
+        previous_default = document.get("agent-default-model") if isinstance(document.get("agent-default-model"), dict) else {}
+        document["agent-default-model"] = {**previous_default, "provider": "apiswitch", "model": model.name}
+        return yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
 
     if agent_type == "hermes":
         parsed = yaml.safe_load(existing_text) if existing_text.strip() else {}
@@ -215,10 +308,9 @@ def agent_content(
         env_value = document.get("env")
         if env_value is not None and not isinstance(env_value, dict):
             raise ValueError("Langcli 现有 env 配置必须是对象")
-        if token:
-            env = dict(env_value or {})
-            env["APISWITCH_API_KEY"] = token
-            document["env"] = env
+        env = dict(env_value or {})
+        env["APISWITCH_API_KEY"] = token or env.get("APISWITCH_API_KEY") or AGENT_TOKEN_PLACEHOLDER
+        document["env"] = env
 
         providers_value = document.get("modelProviders")
         if providers_value is not None and not isinstance(providers_value, dict):
@@ -230,15 +322,16 @@ def agent_content(
         models = [
             item
             for item in (openai_value or [])
-            if not isinstance(item, dict) or item.get("id") != model.name
+            if not isinstance(item, dict) or item.get("description") != "APISwitch unified model"
         ]
-        models.append({
-            "id": model.name,
-            "name": model.name,
-            "description": "APISwitch unified model",
-            "envKey": "APISWITCH_API_KEY",
-            "baseUrl": _gateway_url(base_url, openai=True),
-        })
+        for selected in selected_models:
+            models.append({
+                "id": selected.name,
+                "name": selected.name,
+                "description": "APISwitch unified model",
+                "envKey": "APISWITCH_API_KEY",
+                "baseUrl": _gateway_url(base_url, openai=True),
+            })
         providers["openai"] = models
         document["modelProviders"] = providers
         document["model"] = f"custom:{model.name}"
@@ -271,18 +364,27 @@ def preview_agent_config(
     main_model_id: int | None,
     base_url: str,
     config_path: str | None = None,
+    model_ids: list[int] | None = None,
     api_token: str | None = None,
 ) -> dict[str, Any]:
     target = validate_user_config_path(Path(config_path)) if config_path else default_agent_path(agent_type)
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-    content = agent_content(db, agent_type, main_model_id, base_url, existing_text=existing, api_token=api_token)
+    content = agent_content(
+        db,
+        agent_type,
+        main_model_id,
+        base_url,
+        model_ids=model_ids,
+        existing_text=existing,
+        api_token=api_token,
+    )
     return {
         "agent_type": agent_type,
         "label": AGENT_SPECS[agent_type]["label"],
         "config_path": str(target),
         "language": AGENT_SPECS[agent_type]["language"],
-        "content": _redact(content, api_token),
-        "token_hint": "客户端 Token 仅写入目标配置且不会进入 APISwitch 数据库；留空时使用现有值或 APISWITCH_API_KEY 环境变量。",
+        "content": content,
+        "token_hint": "可自动创建独立 API Key，也可选择已有 Key；明文直接写入此配置，不依赖系统环境变量。",
     }
 
 
@@ -307,12 +409,41 @@ def atomic_write_config(target: Path, content: dict[str, Any]) -> Path | None:
     return atomic_write_text(target, json.dumps(content, ensure_ascii=False, indent=2) + "\n")
 
 
-def write_agent_config(db: Session, row: AgentConfig, base_url: str, api_token: str | None = None) -> Path | None:
+def validate_agent_content(agent_type: str, content: str) -> None:
+    """Reject malformed user-edited content before replacing a working config."""
+    if agent_type == "codex":
+        tomlkit.parse(content)
+    elif agent_type in {"opencode", "openclaw", "langcli", "claude-code"}:
+        _load_json5(content)
+    elif agent_type in {"deepseek-harness", "hermes"}:
+        parsed = yaml.safe_load(content)
+        if not isinstance(parsed, dict):
+            raise ValueError("Agent 配置根节点必须是对象")
+    elif agent_type == "gemini-cli" and not content.strip():
+        raise ValueError("Gemini CLI 配置不能为空")
+
+
+def write_agent_config(
+    db: Session,
+    row: AgentConfig,
+    base_url: str,
+    api_token: str | None = None,
+    content_override: str | None = None,
+) -> Path | None:
     if not row.config_path:
         raise ValueError("Agent 配置路径未设置")
     target = validate_user_config_path(Path(row.config_path))
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-    content = agent_content(db, row.agent_type, row.main_model_id, base_url, existing_text=existing, api_token=api_token)
+    content = content_override if content_override is not None else agent_content(
+        db,
+        row.agent_type,
+        row.main_model_id,
+        base_url,
+        model_ids=row.model_ids_json or None,
+        existing_text=existing,
+        api_token=api_token,
+    )
+    validate_agent_content(row.agent_type, content)
     backup = atomic_write_text(target, content)
     row.last_written_base_url = base_url
     row.last_backup_path = str(backup) if backup else None
@@ -389,12 +520,13 @@ def write_claude_config(
     row: AgentConfig,
     base_url: str,
     api_token: str | None = None,
+    content_override: str | None = None,
 ) -> Path | None:
     if not row.config_path:
         raise ValueError("Claude Code 配置路径未设置")
     target = validate_user_config_path(Path(row.config_path))
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
-    content = claude_content(
+    content = _load_json5(content_override) if content_override is not None else claude_content(
         db,
         {field: getattr(row, field) for field in MODEL_FIELDS},
         base_url,
@@ -408,6 +540,75 @@ def write_claude_config(
     return backup
 
 
+def _refresh_model_ids(db: Session, row: AgentConfig) -> list[int]:
+    """Upgrade legacy rows while preserving Harness's former all-model behavior."""
+    configured = row.model_ids_json or []
+    values = [row.main_model_id, *configured]
+    values.extend(getattr(row, field) for field in MODEL_FIELDS[1:])
+    if not configured and row.agent_type == "deepseek-harness":
+        values.extend(model.id for model in _callable_agent_models(db, AGENT_SPECS[row.agent_type]["protocol"]))
+    return list(dict.fromkeys(value for value in values if isinstance(value, int)))
+
+
+def _config_contains_token(row: AgentConfig, token: ApiToken) -> bool:
+    if not row.config_path:
+        return False
+    target = Path(row.config_path)
+    if not target.is_file():
+        return False
+    try:
+        content = target.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return any(hash_api_token(value) == token.token_hash for value in _AGENT_TOKEN_PATTERN.findall(content))
+
+
+def _ensure_refresh_token(db: Session, row: AgentConfig, model_ids: list[int]) -> str | None:
+    """Create or recover the plaintext config key during automatic port refresh."""
+    token = db.get(ApiToken, row.api_token_id) if row.api_token_id else None
+    plain: str | None = None
+    manual = (row.api_token_mode or "auto") == "manual"
+    if manual and token is None:
+        raise ValueError("手动选择的 Agent API Key 已不存在，请重新选择")
+    if manual and token and not _config_contains_token(row, token):
+        raise ValueError("Agent 配置中缺少手动选择的 API Key 明文，请重新输入并写入")
+    if token is None:
+        plain = generate_api_token()
+        token = ApiToken(
+            name=f"Agent · {AGENT_SPECS[row.agent_type]['label']}",
+            token_prefix=token_prefix(plain),
+            token_hash=hash_api_token(plain),
+            scopes_json=["gateway:invoke"],
+            enabled=True,
+        )
+        db.add(token)
+        db.flush()
+        row.api_token_id = token.id
+    elif not manual and not _config_contains_token(row, token):
+        # Only the hash is retained in the database. If the local plaintext was
+        # removed, rotate to a recoverable key instead of writing a placeholder.
+        plain = generate_api_token()
+        token.token_prefix = token_prefix(plain)
+        token.token_hash = hash_api_token(plain)
+        token.last_used_at = None
+        token.enabled = True
+
+    if manual:
+        allowed = set(db.scalars(
+            select(ApiTokenUnifiedModel.unified_model_id).where(ApiTokenUnifiedModel.api_token_id == token.id)
+        ).all())
+        missing = [model_id for model_id in model_ids if model_id not in allowed]
+        if missing:
+            raise ValueError("手动选择的 API Key 未授权当前 Agent 的全部模型")
+    else:
+        db.query(ApiTokenUnifiedModel).filter(ApiTokenUnifiedModel.api_token_id == token.id).delete(
+            synchronize_session=False
+        )
+        for model_id in model_ids:
+            db.add(ApiTokenUnifiedModel(api_token_id=token.id, unified_model_id=model_id))
+    return plain
+
+
 def refresh_enabled_agent_configs(db: Session, base_url: str) -> int:
     rows = db.scalars(
         select(AgentConfig).where(
@@ -416,10 +617,13 @@ def refresh_enabled_agent_configs(db: Session, base_url: str) -> int:
     ).all()
     changed = [row for row in rows if row.last_written_base_url != base_url]
     for row in changed:
+        model_ids = _refresh_model_ids(db, row)
+        row.model_ids_json = model_ids
+        api_token = _ensure_refresh_token(db, row, model_ids)
         if row.agent_type == "claude-code":
-            write_claude_config(db, row, base_url)
+            write_claude_config(db, row, base_url, api_token=api_token)
         elif row.agent_type in AGENT_SPECS:
-            write_agent_config(db, row, base_url)
+            write_agent_config(db, row, base_url, api_token=api_token)
     db.commit()
     return len(changed)
 

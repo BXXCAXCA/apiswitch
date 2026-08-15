@@ -303,6 +303,11 @@ class AgentConfig(Base, TimestampMixin):
     opus_model_id: Mapped[int | None] = mapped_column(ForeignKey("unified_models.id"), nullable=True)
     sonnet_model_id: Mapped[int | None] = mapped_column(ForeignKey("unified_models.id"), nullable=True)
     haiku_model_id: Mapped[int | None] = mapped_column(ForeignKey("unified_models.id"), nullable=True)
+    model_ids_json: Mapped[list[int]] = mapped_column(JSON, default=list)
+    api_token_id: Mapped[int | None] = mapped_column(
+        ForeignKey("api_tokens.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    api_token_mode: Mapped[str] = mapped_column(String(16), default="auto")
     last_written_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     last_backup_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
 

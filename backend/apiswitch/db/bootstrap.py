@@ -109,6 +109,15 @@ def _ensure_generation_two_columns(path: Path | None) -> None:
         }
         for name,definition in budget_additions.items():
             if budget_columns and name not in budget_columns:connection.execute(f"ALTER TABLE budgets ADD COLUMN {name} {definition}")
+        agent_columns={row[1] for row in connection.execute("PRAGMA table_info(agent_configs)")}
+        if agent_columns and "model_ids_json" not in agent_columns:
+            connection.execute("ALTER TABLE agent_configs ADD COLUMN model_ids_json JSON NOT NULL DEFAULT '[]'")
+        if agent_columns and "api_token_id" not in agent_columns:
+            connection.execute("ALTER TABLE agent_configs ADD COLUMN api_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL")
+        if agent_columns and "api_token_mode" not in agent_columns:
+            connection.execute("ALTER TABLE agent_configs ADD COLUMN api_token_mode VARCHAR(16) NOT NULL DEFAULT 'auto'")
+        if agent_columns:
+            connection.execute("CREATE INDEX IF NOT EXISTS ix_agent_configs_api_token_id ON agent_configs(api_token_id)")
         connection.commit()
 
 

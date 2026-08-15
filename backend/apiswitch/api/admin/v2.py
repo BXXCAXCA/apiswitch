@@ -1,6 +1,8 @@
 """Administrative API for the v2 product structure."""
 from __future__ import annotations
 
+import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -313,6 +315,16 @@ def list_upstream_models(instance_id: int, db: Session = Depends(get_db)) -> lis
     return [_model_out(row,db) for row in db.scalars(select(UpstreamModel).where(UpstreamModel.provider_instance_id == instance_id).order_by(UpstreamModel.id)).all()]
 
 
+@router.get("/upstream-models")
+def list_all_upstream_models(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+    rows=db.execute(
+        select(UpstreamModel,ProviderInstance.name)
+        .join(ProviderInstance,UpstreamModel.provider_instance_id==ProviderInstance.id)
+        .order_by(ProviderInstance.name,UpstreamModel.model_id,UpstreamModel.id)
+    ).all()
+    return [{**_model_out(model,db),"provider_name":provider_name} for model,provider_name in rows]
+
+
 def _write_model(db: Session, instance_id: int, item: dict[str, Any], existing: UpstreamModel | None = None) -> UpstreamModel:
     model_id = str(item.get("model_id") or item.get("id") or "").strip()
     if not model_id: raise _error("validation_error", "上游模型 ID 必填")
@@ -446,8 +458,13 @@ def delete_upstream_model(model_id: int, db: Session = Depends(get_db)) -> dict[
 @router.post("/upstream-models/bulk")
 def bulk_upstream_models(payload: dict[str, Any] = Body(...), db: Session = Depends(get_db)) -> dict[str, Any]:
     ids=payload.get("ids",[]); action=payload.get("action")
-    rows=db.scalars(select(UpstreamModel).where(UpstreamModel.id.in_(ids))).all()
-    if action not in {"enable","disable","delete"}: raise _error("validation_error", "不支持的批量操作")
+    if not isinstance(ids,list) or not ids or any(not isinstance(model_id,int) for model_id in ids) or len(ids)!=len(set(ids)):
+        raise _error("validation_error", "ids 必须是非空且不重复的整数数组")
+    rows=list(db.scalars(select(UpstreamModel).where(UpstreamModel.id.in_(ids))).all())
+    found_ids={row.id for row in rows}
+    missing_ids=sorted(set(ids)-found_ids)
+    if missing_ids:raise _error("validation_error","部分上游模型不存在",details={"missing_ids":missing_ids})
+    if action not in {"enable","disable","delete","configure"}: raise _error("validation_error", "不支持的批量操作")
     if action=="delete":
         blocked=[]
         for row in rows:
@@ -455,8 +472,31 @@ def bulk_upstream_models(payload: dict[str, Any] = Body(...), db: Session = Depe
             if refs:blocked.append(row.id)
         if blocked:raise _error("resource_in_use","部分上游模型正被引用",details={"references":blocked})
         for row in rows:db.delete(row)
-    else:
+    elif action in {"enable","disable"}:
         for row in rows: row.enabled=action=="enable"
+    else:
+        configuration=payload.get("configuration")
+        if not isinstance(configuration,dict) or not configuration:
+            raise _error("validation_error","configuration 必须是非空对象")
+        allowed={"input_capabilities_json","output_capabilities_json","context_window","max_output_tokens","input_price","output_price","cached_input_price","tags_json"}
+        unknown=sorted(set(configuration)-allowed)
+        if unknown:raise _error("validation_error","批量配置包含不支持的字段",details={"fields":unknown})
+        normalized=dict(configuration)
+        for key in ("input_capabilities_json","output_capabilities_json"):
+            if key in normalized:normalized[key]=_valid_capabilities(normalized[key],field=key)
+        for key in ("context_window","max_output_tokens"):
+            value=normalized.get(key)
+            if key in normalized and value is not None and (isinstance(value,bool) or not isinstance(value,int) or value<1):
+                raise _error("validation_error",f"{key} 必须是正整数或 null")
+        for key in ("input_price","output_price","cached_input_price"):
+            value=normalized.get(key)
+            if key in normalized and value is not None and (isinstance(value,bool) or not isinstance(value,(int,float)) or value<0):
+                raise _error("validation_error",f"{key} 必须是非负数或 null")
+        if "tags_json" in normalized and (not isinstance(normalized["tags_json"],list) or any(not isinstance(tag,str) or not tag.strip() for tag in normalized["tags_json"])):
+            raise _error("validation_error","tags_json 必须是字符串数组")
+        for row in rows:
+            for key,value in normalized.items():setattr(row,key,value)
+            if any(key in normalized for key in ("input_price","output_price","cached_input_price")):row.pricing_source="manual"
     db.commit(); return {"updated":len(rows),"action":action}
 
 
@@ -538,6 +578,29 @@ def add_candidate(unified_id:int,payload:dict[str,Any]=Body(...),db:Session=Depe
     priority=payload.get("priority")
     if priority is None:priority=(db.scalar(select(func.max(UnifiedModelCandidate.priority)).where(UnifiedModelCandidate.unified_model_id==unified_id)) or 0)+1
     row=UnifiedModelCandidate(unified_model_id=unified_id,upstream_model_id=upstream_id,priority=priority,weight=payload.get("weight",100),capability_overrides_json=overrides,enabled=payload.get("enabled",True));db.add(row);db.commit();db.refresh(row);return _candidate_out(db,row)
+
+
+@router.post("/unified-models/{unified_id}/candidates/bulk",status_code=201)
+def add_candidates_bulk(unified_id:int,payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->list[dict[str,Any]]:
+    if not db.get(UnifiedModel,unified_id):raise HTTPException(404,"统一模型不存在")
+    upstream_ids=payload.get("upstream_model_ids")
+    if not isinstance(upstream_ids,list) or not upstream_ids or any(not isinstance(model_id,int) for model_id in upstream_ids) or len(upstream_ids)!=len(set(upstream_ids)):
+        raise _error("validation_error","upstream_model_ids 必须是非空且不重复的整数数组")
+    found_ids=set(db.scalars(select(UpstreamModel.id).where(UpstreamModel.id.in_(upstream_ids))).all())
+    missing_ids=sorted(set(upstream_ids)-found_ids)
+    if missing_ids:raise _error("validation_error","部分上游模型不存在",details={"missing_ids":missing_ids})
+    existing_ids=set(db.scalars(select(UnifiedModelCandidate.upstream_model_id).where(UnifiedModelCandidate.unified_model_id==unified_id,UnifiedModelCandidate.upstream_model_id.in_(upstream_ids))).all())
+    if existing_ids:raise _error("validation_error","部分上游模型已是当前统一模型的候选",details={"existing_upstream_model_ids":sorted(existing_ids)})
+    overrides=_valid_capability_map(payload.get("capability_overrides",{}),field="capability_overrides")
+    first_priority=(db.scalar(select(func.max(UnifiedModelCandidate.priority)).where(UnifiedModelCandidate.unified_model_id==unified_id)) or 0)+1
+    rows=[]
+    for offset,upstream_id in enumerate(upstream_ids):
+        row=UnifiedModelCandidate(unified_model_id=unified_id,upstream_model_id=upstream_id,priority=first_priority+offset,weight=payload.get("weight",100),capability_overrides_json=overrides,enabled=payload.get("enabled",True))
+        db.add(row);rows.append(row)
+    db.flush()
+    result=[_candidate_out(db,row) for row in rows]
+    db.commit()
+    return result
 
 
 @router.patch("/unified-models/{unified_id}/candidates/reorder")
@@ -757,6 +820,8 @@ def delete_token(token_id:int,db:Session=Depends(get_db))->dict[str,bool]:
     for log in db.scalars(select(RequestLog).where(RequestLog.api_token_id==token_id)).all():
         log.api_token_prefix_snapshot=log.api_token_prefix_snapshot or row.token_prefix;log.api_token_id=None
     for usage_row in db.scalars(select(UsageHistory).where(UsageHistory.api_token_id==token_id)).all():usage_row.api_token_id=None
+    for agent in db.scalars(select(AgentConfig).where(AgentConfig.api_token_id==token_id)).all():
+        agent.api_token_id=None;agent.api_token_mode="auto"
     db.query(ApiTokenUnifiedModel).filter(ApiTokenUnifiedModel.api_token_id==token_id).delete(synchronize_session=False)
     db.delete(row);db.commit();return {"deleted":True}
 
@@ -949,19 +1014,180 @@ def database_restore(payload:dict[str,Any]=Body(...))->dict[str,bool]:
 @router.get("/agents")
 def agents(db:Session=Depends(get_db))->list[dict[str,Any]]:
     from apiswitch.services.agent_configs import AGENT_SPECS
-    return [{"id":a.id,"agent_type":a.agent_type,"label":AGENT_SPECS.get(a.agent_type,{}).get("label",a.agent_type),"profile_name":a.profile_name,"config_path":a.config_path,"enabled":a.enabled,"main_model_id":a.main_model_id,"opus_model_id":a.opus_model_id,"sonnet_model_id":a.sonnet_model_id,"haiku_model_id":a.haiku_model_id,"last_written_base_url":a.last_written_base_url,"last_backup_path":a.last_backup_path} for a in db.scalars(select(AgentConfig)).all()]
+    rows=[]
+    for agent in db.scalars(select(AgentConfig)).all():
+        token=db.get(ApiToken,agent.api_token_id) if agent.api_token_id else None
+        rows.append({
+            "id":agent.id,"agent_type":agent.agent_type,"label":AGENT_SPECS.get(agent.agent_type,{}).get("label",agent.agent_type),
+            "profile_name":agent.profile_name,"config_path":agent.config_path,"enabled":agent.enabled,
+            "main_model_id":agent.main_model_id,"model_ids":agent.model_ids_json or ([agent.main_model_id] if agent.main_model_id else []),
+            "opus_model_id":agent.opus_model_id,"sonnet_model_id":agent.sonnet_model_id,"haiku_model_id":agent.haiku_model_id,
+            "api_token_id":token.id if token else None,"api_token_prefix":token.token_prefix if token else None,
+            "api_token_name":token.name if token else None,"api_token_mode":agent.api_token_mode or "auto",
+            "last_written_base_url":agent.last_written_base_url,"last_backup_path":agent.last_backup_path,
+        })
+    return rows
+
+
+_AGENT_TOKEN_PATTERN=re.compile(r"ask_[A-Za-z0-9_-]{8,}")
+
+
+def _agent_model_ids(payload:dict[str,Any])->list[int]:
+    raw=payload.get("model_ids",[])
+    if raw is None:raw=[]
+    if not isinstance(raw,list) or any(not isinstance(item,int) or isinstance(item,bool) for item in raw):
+        raise _error("validation_error","model_ids 必须是统一模型 ID 数组","agent_config")
+    values=[payload.get("main_model_id"),*raw]
+    values.extend(payload.get(field) for field in ("opus_model_id","sonnet_model_id","haiku_model_id"))
+    return list(dict.fromkeys(item for item in values if isinstance(item,int) and not isinstance(item,bool)))
+
+
+def _agent_row(db:Session,agent_type:str)->AgentConfig|None:
+    return db.scalar(select(AgentConfig).where(AgentConfig.agent_type==agent_type))
+
+
+def _agent_token_mode(payload:dict[str,Any])->str:
+    mode=str(payload.get("api_token_mode") or "auto")
+    if mode not in {"auto","manual"}:
+        raise _error("validation_error","API Key 模式必须是 auto 或 manual","agent_config")
+    return mode
+
+
+def _manual_agent_token(
+    db:Session,
+    payload:dict[str,Any],
+    saved:AgentConfig|None,
+    model_ids:list[int],
+)->tuple[ApiToken,str|None]:
+    token_id=payload.get("api_token_id")
+    if not isinstance(token_id,int) or isinstance(token_id,bool):
+        raise _error("validation_error","请选择现有 API Key","agent_config")
+    token=db.get(ApiToken,token_id)
+    if not token:
+        raise _error("validation_error","选择的 API Key 不存在","agent_config")
+    if not token.enabled:
+        raise _error("validation_error","选择的 API Key 已停用","agent_config")
+    if "gateway:invoke" not in (token.scopes_json or []):
+        raise _error("validation_error","选择的 API Key 缺少 gateway:invoke 权限","agent_config")
+    if token.expires_at:
+        expires=token.expires_at if token.expires_at.tzinfo else token.expires_at.replace(tzinfo=timezone.utc)
+        if expires<=datetime.now(timezone.utc):
+            raise _error("validation_error","选择的 API Key 已过期","agent_config")
+    allowed=set(db.scalars(select(ApiTokenUnifiedModel.unified_model_id).where(ApiTokenUnifiedModel.api_token_id==token.id)).all())
+    missing=[model_id for model_id in model_ids if model_id not in allowed]
+    if missing:
+        raise _error(
+            "validation_error",
+            "选择的 API Key 未授权全部 Agent 模型，请先在客户端管理中补充模型权限",
+            "agent_config",
+            {"unified_model_ids":missing},
+        )
+    provided=str(payload.get("api_token") or "").strip() or None
+    if provided and hash_api_token(provided)!=token.token_hash:
+        raise _error("validation_error","API Key 明文与所选 Key 不匹配","agent_config")
+    if not provided and (not saved or saved.api_token_id!=token.id):
+        raise _error(
+            "validation_error",
+            "首次选择此 API Key 时请输入明文；APISwitch 数据库只保存哈希，无法反向读取",
+            "agent_config",
+        )
+    return token,provided
+
+
+def _preview_agent_token(
+    db:Session,
+    payload:dict[str,Any],
+    saved:AgentConfig|None,
+    model_ids:list[int],
+)->tuple[str,str|None,ApiToken|None]:
+    from apiswitch.services.agent_configs import AGENT_TOKEN_PLACEHOLDER
+    mode=_agent_token_mode(payload)
+    if mode=="manual":
+        token,plain=_manual_agent_token(db,payload,saved,model_ids)
+        return mode,plain,token
+    saved_token=db.get(ApiToken,saved.api_token_id) if saved and saved.api_token_id and (saved.api_token_mode or "auto")=="auto" else None
+    preview_token=payload.get("api_token") or (
+        AGENT_TOKEN_PLACEHOLDER if payload.get("rotate_api_key") or saved_token is None else None
+    )
+    return mode,preview_token,saved_token
+
+
+def _ensure_agent_token(
+    db:Session,
+    row:AgentConfig,
+    model_ids:list[int],
+    *,
+    requested_token:Any=None,
+    rotate:bool=False,
+)->tuple[str|None,ApiToken,bool]:
+    from apiswitch.services.agent_configs import AGENT_SPECS
+    provided=str(requested_token).strip() if isinstance(requested_token,str) and requested_token.strip() else None
+    token_row=db.get(ApiToken,row.api_token_id) if row.api_token_id else None
+    created=token_row is None
+    plain=provided
+    if token_row is None:
+        plain=plain or generate_api_token()
+        token_row=ApiToken(
+            name=f"Agent · {AGENT_SPECS.get(row.agent_type,{}).get('label',row.agent_type)}",
+            token_prefix=token_prefix(plain),token_hash=hash_api_token(plain),
+            scopes_json=["gateway:invoke"],enabled=True,
+        )
+        db.add(token_row);db.flush();row.api_token_id=token_row.id
+    elif rotate or plain:
+        plain=plain or generate_api_token()
+        token_row.token_prefix=token_prefix(plain);token_row.token_hash=hash_api_token(plain);token_row.last_used_at=None;token_row.enabled=True
+    _replace_token_models(db,token_row.id,model_ids)
+    return plain,token_row,created
+
+
+def _content_with_agent_token(content:str,token_row:ApiToken,plain:str|None)->str:
+    from apiswitch.services.agent_configs import AGENT_TOKEN_PLACEHOLDER
+    rendered=content
+    if plain:
+        rendered=rendered.replace(AGENT_TOKEN_PLACEHOLDER,plain)
+        rendered=_AGENT_TOKEN_PATTERN.sub(
+            lambda match: plain if hash_api_token(match.group(0))==token_row.token_hash else match.group(0),
+            rendered,
+        )
+        if plain not in rendered:
+            raise ValueError("编辑后的配置缺少选定的 Agent API Key")
+        return rendered
+    if not any(hash_api_token(value)==token_row.token_hash for value in _AGENT_TOKEN_PATTERN.findall(rendered)):
+        raise ValueError("编辑后的配置缺少当前 Agent API Key；自动模式可启用轮换，手动模式请重新输入明文")
+    return rendered
+
+
+def _editable_content(value:Any)->str|None:
+    if value is None:return None
+    if isinstance(value,str):return value
+    if isinstance(value,dict):return json.dumps(value,ensure_ascii=False,indent=2)+"\n"
+    raise _error("validation_error","content 必须是可编辑的配置文本","agent_config")
 
 
 def _claude_preview(payload:dict[str,Any],db:Session)->dict[str,Any]:
     from apiswitch.desktop import runtime_info
-    from apiswitch.services.agent_configs import MODEL_FIELDS,claude_content,validate_user_config_path
+    from apiswitch.services.agent_configs import MODEL_FIELDS,_selected_models,claude_content,validate_user_config_path
     base_url=runtime_info()["base_url"]
-    try:content=claude_content(db,{key:payload.get(key) for key in MODEL_FIELDS},str(base_url))
-    except ValueError as exc:raise _error("validation_error",str(exc)) from exc
     from pathlib import Path
     try:target=validate_user_config_path(Path(payload.get("config_path") or Path.home()/".claude"/"settings.json"))
     except ValueError as exc:raise _error("validation_error",str(exc),"agent_config") from exc
-    return {"base_url":base_url,"config_path":str(target),"content":content}
+    existing=target.read_text(encoding="utf-8") if target.is_file() else ""
+    saved=_agent_row(db,"claude-code")
+    model_ids=_agent_model_ids(payload)
+    mode,preview_token,token=_preview_agent_token(db,payload,saved,model_ids)
+    try:
+        _selected_models(db,payload.get("main_model_id"),model_ids,"anthropic_messages")
+        content=claude_content(db,{key:payload.get(key) for key in MODEL_FIELDS},str(base_url),existing_text=existing,api_token=preview_token)
+        rendered=json.dumps(content,ensure_ascii=False,indent=2)+"\n"
+        if mode=="manual" and token:rendered=_content_with_agent_token(rendered,token,preview_token)
+    except ValueError as exc:raise _error("validation_error",str(exc)) from exc
+    return {
+        "base_url":base_url,"config_path":str(target),
+        "content":rendered,"language":"json",
+        "token_hint":"可自动创建独立 API Key，也可选择已有 Key；明文直接写入此配置，不依赖外部环境变量。",
+        "api_token_mode":mode,"api_token_id":token.id if token else None,
+        "api_token_name":token.name if token else None,"api_token_prefix":token.token_prefix if token else None,
+    }
 
 
 @router.post("/agents/claude-code/preview")
@@ -970,15 +1196,26 @@ def claude_preview(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->
 
 @router.post("/agents/claude-code/write")
 def claude_write(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->dict[str,Any]:
-    from pathlib import Path
     from apiswitch.services.agent_configs import MODEL_FIELDS,write_claude_config
-    preview=_claude_preview(payload,db); target=Path(preview["config_path"]);target.parent.mkdir(parents=True,exist_ok=True)
-    row=db.scalar(select(AgentConfig).where(AgentConfig.agent_type=="claude-code")) or AgentConfig(agent_type="claude-code")
+    preview=_claude_preview(payload,db)
+    row=_agent_row(db,"claude-code") or AgentConfig(agent_type="claude-code")
+    previous_mode=row.api_token_mode or "auto"
     for key in MODEL_FIELDS:setattr(row,key,payload.get(key))
-    row.config_path=str(target);row.enabled=True;db.add(row);db.flush()
-    try:backup=write_claude_config(db,row,str(preview["base_url"]));db.commit()
+    model_ids=_agent_model_ids(payload);row.model_ids_json=model_ids
+    row.config_path=preview["config_path"];row.enabled=True;db.add(row);db.flush()
+    try:
+        mode=_agent_token_mode(payload)
+        if mode=="manual":
+            token_row,plain=_manual_agent_token(db,payload,row,model_ids);created=False
+            row.api_token_id=token_row.id;row.api_token_mode="manual"
+        else:
+            if previous_mode!="auto":row.api_token_id=None
+            row.api_token_mode="auto"
+            plain,token_row,created=_ensure_agent_token(db,row,model_ids,requested_token=payload.get("api_token"),rotate=bool(payload.get("rotate_api_key")))
+        content=_content_with_agent_token(_editable_content(payload.get("content")) or preview["content"],token_row,plain)
+        backup=write_claude_config(db,row,str(preview["base_url"]),api_token=plain,content_override=content);db.commit()
     except (OSError,ValueError) as exc:db.rollback();raise _error("agent_write_failed",str(exc),"agent_config") from exc
-    return {"written":True,"path":str(target),"backup_path":str(backup) if backup else None}
+    return {"written":True,"path":row.config_path,"backup_path":str(backup) if backup else None,"api_token_mode":row.api_token_mode,"api_token_id":token_row.id,"api_token_prefix":token_row.token_prefix,"api_token_created":created}
 
 
 @router.post("/agents/claude-code/restore")
@@ -992,7 +1229,20 @@ def claude_restore(payload:dict[str,Any]=Body(...))->dict[str,bool]:
 def _agent_preview(agent_type:str,payload:dict[str,Any],db:Session)->dict[str,Any]:
     from apiswitch.desktop import runtime_info
     from apiswitch.services.agent_configs import preview_agent_config
-    try:return preview_agent_config(db,agent_type,payload.get("main_model_id"),str(runtime_info()["base_url"]),payload.get("config_path"),payload.get("api_token"))
+    saved=_agent_row(db,agent_type)
+    model_ids=_agent_model_ids(payload)
+    mode,preview_token,token=_preview_agent_token(db,payload,saved,model_ids)
+    try:
+        result=preview_agent_config(
+            db,agent_type,payload.get("main_model_id"),str(runtime_info()["base_url"]),payload.get("config_path"),
+            model_ids=model_ids,api_token=preview_token,
+        )
+        if mode=="manual" and token:result["content"]=_content_with_agent_token(result["content"],token,preview_token)
+        result["api_token_mode"]=mode
+        result["api_token_id"]=token.id if token else None
+        result["api_token_name"]=token.name if token else None
+        result["api_token_prefix"]=token.token_prefix if token else None
+        return result
     except (OSError,ValueError) as exc:raise _error("validation_error",str(exc),"agent_config") from exc
 
 
@@ -1006,11 +1256,23 @@ def agent_write(agent_type:str,payload:dict[str,Any]=Body(...),db:Session=Depend
     from apiswitch.desktop import runtime_info
     from apiswitch.services.agent_configs import write_agent_config
     preview=_agent_preview(agent_type,payload,db)
-    row=db.scalar(select(AgentConfig).where(AgentConfig.agent_type==agent_type)) or AgentConfig(agent_type=agent_type)
-    row.config_path=preview["config_path"];row.main_model_id=payload.get("main_model_id");row.enabled=True;db.add(row);db.flush()
-    try:backup=write_agent_config(db,row,str(runtime_info()["base_url"]),payload.get("api_token"));db.commit()
+    row=_agent_row(db,agent_type) or AgentConfig(agent_type=agent_type)
+    previous_mode=row.api_token_mode or "auto"
+    model_ids=_agent_model_ids(payload)
+    row.config_path=preview["config_path"];row.main_model_id=payload.get("main_model_id");row.model_ids_json=model_ids;row.enabled=True;db.add(row);db.flush()
+    try:
+        mode=_agent_token_mode(payload)
+        if mode=="manual":
+            token_row,plain=_manual_agent_token(db,payload,row,model_ids);created=False
+            row.api_token_id=token_row.id;row.api_token_mode="manual"
+        else:
+            if previous_mode!="auto":row.api_token_id=None
+            row.api_token_mode="auto"
+            plain,token_row,created=_ensure_agent_token(db,row,model_ids,requested_token=payload.get("api_token"),rotate=bool(payload.get("rotate_api_key")))
+        content=_content_with_agent_token(_editable_content(payload.get("content")) or preview["content"],token_row,plain)
+        backup=write_agent_config(db,row,str(runtime_info()["base_url"]),plain,content_override=content);db.commit()
     except (OSError,ValueError) as exc:db.rollback();raise _error("agent_write_failed",str(exc),"agent_config") from exc
-    return {"written":True,"path":row.config_path,"backup_path":str(backup) if backup else None,"agent_type":agent_type}
+    return {"written":True,"path":row.config_path,"backup_path":str(backup) if backup else None,"agent_type":agent_type,"api_token_mode":row.api_token_mode,"api_token_id":token_row.id,"api_token_prefix":token_row.token_prefix,"api_token_created":created}
 
 
 @router.post("/agents/{agent_type}/restore")

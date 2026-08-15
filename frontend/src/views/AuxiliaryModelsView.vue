@@ -6,15 +6,15 @@
     <n-card title="辅助模型池">
       <n-form label-placement="top">
         <n-grid responsive="screen" :cols="'1 m:2'" :x-gap="16">
+          <n-form-item-gi label="模型能力"><n-space vertical><capability-checkbox-group data-testid="aux-capability-filter" :model-value="modelForm.capabilities" :options="allCapabilityOptions" @update:model-value="changeModelCapabilities"/><span class="model-preview">先选择能力，再从 {{ upstreamOptions.length }} 个匹配模型中选择上游模型。</span><span v-if="capabilitySource" class="model-preview">{{ capabilitySource }}</span></n-space></n-form-item-gi>
           <n-form-item-gi label="上游模型">
             <n-space vertical style="width:100%">
-              <n-select data-testid="aux-upstream-select" v-model:value="modelForm.upstream_model_id" filterable clearable :options="upstreamOptions" :render-label="renderUpstreamLabel" :consistent-menu-width="false" placeholder="请选择上游模型" style="width:100%;min-width:300px" @update:value="useUpstreamModel" />
+              <n-select data-testid="aux-upstream-select" v-model:value="modelForm.upstream_model_id" filterable clearable :disabled="!modelForm.capabilities.length" :options="upstreamOptions" :render-label="renderUpstreamLabel" :consistent-menu-width="false" :placeholder="modelForm.capabilities.length?'请选择匹配的上游模型':'请先选择模型能力'" style="width:100%;min-width:300px" @update:value="useUpstreamModel" />
               <span v-if="selectedUpstreamLabel" class="model-preview">当前选择：{{ selectedUpstreamLabel }}</span>
-              <span class="model-preview">完整名称可悬停预览；能力会根据已识别的上游模型自动填充。</span>
+              <span class="model-preview">完整名称可悬停预览；仅显示同时具备全部所选能力的可用模型。</span>
             </n-space>
           </n-form-item-gi>
           <n-form-item-gi v-if="mode === 'per_unified_model'" label="统一模型"><n-select v-model:value="modelForm.unified_model_id" :options="unifiedOptions" /></n-form-item-gi>
-          <n-form-item-gi label="模型能力"><n-space vertical><capability-checkbox-group v-model="modelForm.capabilities" :options="allCapabilityOptions" /><span v-if="capabilitySource" class="model-preview">{{ capabilitySource }}</span></n-space></n-form-item-gi>
         </n-grid>
         <n-space><n-button type="primary" @click="addModel">添加辅助模型</n-button><n-button :loading="loadingUpstream" @click="loadUpstreamModels">刷新上游模型</n-button></n-space>
       </n-form>
@@ -50,12 +50,13 @@ const modeLabels:Record<string,string>={disabled:'关闭辅助模型',per_unifie
 const workflowLabels:Record<string,string>={vision_to_text:'图像转文本',file_extract:'文件内容提取',context_compress:'上下文压缩',tool_plan:'工具规划',audio_transcribe:'音频转写',structured_repair:'结构化输出修复',terminal_capability:'终端能力补全'}
 const modeOptions=Object.entries(modeLabels).map(([value,label])=>({label,value}));const workflowOptions=Object.entries(workflowLabels).map(([value,label])=>({label,value}))
 const modelForm=reactive<any>({upstream_model_id:null,unified_model_id:null,capabilities:['vision']});const workflowForm=reactive<any>({workflow_type:'vision_to_text',unified_model_id:null,input_capability:'vision',output_capability:'text',steps:'[{"input":"vision","output":"text"}]'})
-const unifiedOptions=computed(()=>unified.value.map(x=>({label:x.name,value:x.id})));const upstreamOptions=computed(()=>upstream.value.filter(x=>x.enabled!==false&&x.remote_status!=='missing').map(x=>({label:`${x.provider_name} / ${x.display_name||x.model_id}${x.display_name&&x.display_name!==x.model_id?` · ${x.model_id}`:''}`,value:x.id})));const selectedUpstreamLabel=computed(()=>upstreamOptions.value.find(x=>x.value===modelForm.upstream_model_id)?.label||'')
+const unifiedOptions=computed(()=>unified.value.map(x=>({label:x.name,value:x.id})));const modelCapabilities=(model:any)=>Array.from(new Set([...(model.input_capabilities_json||[]),...(model.output_capabilities_json||[])]));const upstreamOptions=computed(()=>{const required=modelForm.capabilities as string[];return upstream.value.filter(x=>x.enabled!==false&&x.remote_status!=='missing'&&required.every(capability=>modelCapabilities(x).includes(capability))).map(x=>({label:`${x.provider_name} / ${x.display_name||x.model_id}${x.display_name&&x.display_name!==x.model_id?` · ${x.model_id}`:''}`,value:x.id}))});const selectedUpstreamLabel=computed(()=>upstreamOptions.value.find(x=>x.value===modelForm.upstream_model_id)?.label||'')
 const validCapabilities=new Set(allCapabilityOptions.map(option=>option.value))
 function renderUpstreamLabel(option:any){return h(NTooltip,{placement:'right',style:{maxWidth:'720px'}},{trigger:()=>h('span',{style:{display:'block',maxWidth:'680px',whiteSpace:'normal',wordBreak:'break-all'}},String(option.label)),default:()=>String(option.label)})}
 async function loadUpstreamModels(){loadingUpstream.value=true;try{upstream.value=(await Promise.all(providers.value.map(async p=>(await getJson<any[]>(`/api/admin/provider-instances/${p.id}/upstream-models`)).map(x=>({...x,provider_name:p.name}))))).flat()}finally{loadingUpstream.value=false}}
 async function load(){mode.value=(await getJson('/api/admin/auxiliary/settings') as any).mode;[models.value,workflows.value,unified.value,providers.value]=await Promise.all([getJson('/api/admin/auxiliary/models'),getJson('/api/admin/auxiliary/workflows'),getJson('/api/admin/unified-models'),getJson('/api/admin/provider-instances')]) as any;await loadUpstreamModels()}
-function useUpstreamModel(id:number|null){if(!id){modelForm.capabilities=[];capabilitySource.value='';return}const model=upstream.value.find(item=>item.id===id);if(!model)return;modelForm.capabilities=Array.from(new Set([...(model.input_capabilities_json||[]),...(model.output_capabilities_json||[])])).filter(capability=>validCapabilities.has(capability));capabilitySource.value='已根据上游模型的输入/输出能力自动识别，可手动调整'}
+function changeModelCapabilities(capabilities:string[]){modelForm.capabilities=[...capabilities].filter(capability=>validCapabilities.has(capability));if(modelForm.upstream_model_id&&!upstreamOptions.value.some(option=>option.value===modelForm.upstream_model_id)){modelForm.upstream_model_id=null;capabilitySource.value='原上游模型不具备全部所选能力，已自动清除'}else{capabilitySource.value=modelForm.capabilities.length?'已按所选能力筛选上游模型':''}}
+function useUpstreamModel(id:number|null){if(!id){capabilitySource.value=modelForm.capabilities.length?'已按所选能力筛选上游模型':'';return}capabilitySource.value='已选择具备全部所选能力的上游模型'}
 async function saveMode(){await patchJson('/api/admin/auxiliary/settings',{mode:mode.value});message.success('辅助模式已保存')}
 async function addModel(){if(!modelForm.upstream_model_id)return message.warning('请选择上游模型');await postJson('/api/admin/auxiliary/models',{upstream_model_id:modelForm.upstream_model_id,unified_model_id:mode.value==='per_unified_model'?modelForm.unified_model_id:null,capabilities:[...modelForm.capabilities]});await load()}
 async function removeModel(row:any){await deleteJson(`/api/admin/auxiliary/models/${row.id}`);await load()}
