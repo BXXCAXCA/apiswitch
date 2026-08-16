@@ -82,7 +82,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue'
 import { NAlert, NButton, NCard, NDataTable, NEmpty, NForm, NFormItem, NH1, NInput, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTab, NTabs, NTag, useMessage } from 'naive-ui'
-import { getJson, postJson } from '../api/client'
+import { deleteJson, getJson, postJson } from '../api/client'
 
 const message = useMessage()
 const models = ref<any[]>([])
@@ -90,6 +90,7 @@ const agents = ref<any[]>([])
 const tokens = ref<any[]>([])
 const previewResult = ref<any>()
 const working = ref(false)
+const deletingAgentType = ref<string|null>(null)
 const agentTypes = [
   { label: 'Claude Code', value: 'claude-code', protocol: 'anthropic_messages', protocolLabel: 'Anthropic Messages', pathHint: '~/.claude/settings.json', description: '配置可用模型及可选的 Opus、Sonnet、Haiku 模型映射。' },
   { label: 'Codex', value: 'codex', protocol: 'openai_responses', protocolLabel: 'OpenAI Responses', pathHint: '~/.codex/config.toml', description: '写入独立 model_provider、默认模型和明文 Bearer Token。' },
@@ -134,7 +135,8 @@ const columns: any[] = [
   { title: '配置路径', key: 'config_path', ellipsis: { tooltip: true } },
   { title: '状态', key: 'enabled', render: (row: any) => h(NTag, { type: row.enabled ? 'success' : 'default' }, { default: () => row.enabled ? '已启用' : '未启用' }) },
   { title: '最后网关地址', key: 'last_written_base_url', render: (row: any) => row.last_written_base_url || '-' },
-  { title: '最近备份', key: 'last_backup_path', ellipsis: { tooltip: true }, render: (row: any) => row.last_backup_path || '-' }
+  { title: '最近备份', key: 'last_backup_path', ellipsis: { tooltip: true }, render: (row: any) => row.last_backup_path || '-' },
+  { title: '操作', key: 'actions', width: 90, render: (row: any) => h(NButton, { size: 'small', type: 'error', loading: deletingAgentType.value === row.agent_type, 'data-testid': `agent-delete-${row.agent_type}`, onClick: () => removeAgent(row) }, { default: () => '删除' }) }
 ]
 
 function payload(includeContent = false) {
@@ -221,6 +223,16 @@ async function restore() {
     await postJson(`/api/admin/agents/${form.agent_type}/restore`, { config_path: saved.value.config_path, backup_path: saved.value.last_backup_path })
     message.success('已恢复上次备份')
   } catch (error) { message.error(String(error)) }
+}
+async function removeAgent(row: any) {
+  deletingAgentType.value = row.agent_type
+  try {
+    const result: any = await deleteJson(`/api/admin/agents/${row.agent_type}`)
+    previewResult.value = undefined
+    await load()
+    message.success(result.api_token_deleted ? 'Agent 配置已删除，独立 API Key 已撤销；外部配置文件已保留' : 'Agent 配置已删除；共享 API Key 和外部配置文件已保留')
+  } catch (error) { message.error(String(error)) }
+  finally { deletingAgentType.value = null }
 }
 onMounted(load)
 </script>

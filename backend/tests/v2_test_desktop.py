@@ -7,7 +7,7 @@ import yaml
 from apiswitch import __version__
 from apiswitch.db.models import AgentConfig
 from apiswitch.db.session import SessionLocal
-from apiswitch.desktop import DesktopTray, _clear_runtime, _refresh_agents_for_port_change, _select_port, _write_runtime
+from apiswitch.desktop import DesktopTray, _clear_runtime, _refresh_agents_for_port_change, _repair_startup_command, _select_port, _stop_backend_server, _write_runtime, is_startup_enabled
 
 
 def test_runtime_file_uses_package_version(tmp_path, monkeypatch):
@@ -56,6 +56,82 @@ def test_minimizing_keeps_native_taskbar_restore_available():
     tray.window = type("Window", (), {"hide": lambda self: hide_calls.append(True)})()
     tray.on_minimized()
     assert hide_calls == []
+
+
+def test_window_close_hides_to_tray_and_explains_how_to_exit(monkeypatch):
+    tray = object.__new__(DesktopTray)
+    tray.exiting = False
+    hidden=[];notifications=[]
+    tray.window = type("Window", (), {"hide": lambda self: hidden.append(True)})()
+    tray.icon = type("Icon", (), {"notify": lambda self, message, title: notifications.append((message,title))})()
+
+    class ImmediateThread:
+        def __init__(self,target,**_kwargs):self.target=target
+        def start(self):self.target()
+
+    monkeypatch.setattr("apiswitch.desktop.threading.Thread",ImmediateThread)
+
+    assert tray.on_closing() is False
+    assert tray.exiting is False
+    assert hidden==[True]
+    assert notifications and "托盘" in notifications[0][0] and "退出" in notifications[0][0]
+
+
+def test_enabled_startup_entry_is_recognized_and_repaired_after_upgrade(monkeypatch):
+    writes=[]
+    monkeypatch.setattr("apiswitch.desktop._read_startup_command",lambda:'C:\\old\\APISwitch-v0.1.14.exe --background')
+    monkeypatch.setattr("apiswitch.desktop._startup_command",lambda:'C:\\new\\APISwitch-v0.1.15.exe --background')
+    monkeypatch.setattr("apiswitch.desktop._write_startup_command",lambda value:writes.append(value))
+
+    assert is_startup_enabled() is True
+    assert _repair_startup_command() is True
+    assert writes==['C:\\new\\APISwitch-v0.1.15.exe --background']
+
+
+def test_backend_shutdown_escalates_when_graceful_wait_does_not_finish():
+    class Server:
+        should_exit = False
+        force_exit = False
+
+    class Worker:
+        join_timeouts: list[float] = []
+
+        def join(self, timeout: float) -> None:
+            self.join_timeouts.append(timeout)
+
+        def is_alive(self) -> bool:
+            return len(self.join_timeouts) < 2
+
+    server = Server()
+    worker = Worker()
+
+    assert _stop_backend_server(server, worker, graceful_timeout=3, force_timeout=2) is True
+    assert server.should_exit is True
+    assert server.force_exit is True
+    assert worker.join_timeouts == [3, 2]
+
+
+def test_backend_shutdown_does_not_force_a_completed_graceful_exit():
+    class Server:
+        should_exit = False
+        force_exit = False
+
+    class Worker:
+        join_timeouts: list[float] = []
+
+        def join(self, timeout: float) -> None:
+            self.join_timeouts.append(timeout)
+
+        def is_alive(self) -> bool:
+            return False
+
+    server = Server()
+    worker = Worker()
+
+    assert _stop_backend_server(server, worker) is True
+    assert server.should_exit is True
+    assert server.force_exit is False
+    assert worker.join_timeouts == [3]
 
 
 def test_port_change_backs_up_and_refreshes_enabled_claude_config(client, tmp_path, monkeypatch):
@@ -398,6 +474,59 @@ def test_agent_can_select_an_existing_api_key_without_changing_its_model_permiss
     assert auto_write.json()["api_token_mode"]=="auto"
     assert auto_write.json()["api_token_id"]!=existing["id"]
     assert len(client.get("/api/admin/tokens").json())==2
+
+
+def test_deleting_agent_config_revokes_only_its_independent_token_and_preserves_files(client,tmp_path,monkeypatch):
+    model=client.post(
+        "/api/admin/unified-models",
+        json={"name":"deletable-agent","enabled_protocols":["openai_chat"]},
+    ).json()
+    monkeypatch.setattr("apiswitch.desktop.runtime_info",lambda:{"base_url":"http://127.0.0.1:8080"})
+    automatic_target=tmp_path/"automatic-opencode.json"
+    automatic_payload={"config_path":str(automatic_target),"main_model_id":model["id"],"model_ids":[model["id"]]}
+    automatic_preview=client.post("/api/admin/agents/opencode/preview",json=automatic_payload).json()
+    automatic_write=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**automatic_payload,"content":automatic_preview["content"]},
+    )
+    assert automatic_write.status_code==200,automatic_write.text
+    independent_token_id=automatic_write.json()["api_token_id"]
+
+    deleted=client.delete("/api/admin/agents/opencode")
+    assert deleted.status_code==200,deleted.text
+    assert deleted.json()=={
+        "deleted":True,
+        "agent_type":"opencode",
+        "api_token_deleted":True,
+        "config_file_preserved":True,
+        "config_path":str(automatic_target),
+    }
+    assert automatic_target.is_file()
+    assert client.get("/api/admin/agents").json()==[]
+    assert all(row["id"]!=independent_token_id for row in client.get("/api/admin/tokens").json())
+
+    shared=client.post(
+        "/api/admin/tokens",
+        json={"name":"shared-agent-key","scopes":["gateway:invoke"],"unified_model_ids":[model["id"]]},
+    ).json()
+    manual_target=tmp_path/"manual-opencode.json"
+    manual_payload={
+        "config_path":str(manual_target),"main_model_id":model["id"],"model_ids":[model["id"]],
+        "api_token_mode":"manual","api_token_id":shared["id"],"api_token":shared["token"],
+    }
+    manual_preview=client.post("/api/admin/agents/opencode/preview",json=manual_payload).json()
+    manual_write=client.post(
+        "/api/admin/agents/opencode/write",
+        json={**manual_payload,"content":manual_preview["content"]},
+    )
+    assert manual_write.status_code==200,manual_write.text
+
+    deleted_manual=client.delete("/api/admin/agents/opencode")
+    assert deleted_manual.status_code==200,deleted_manual.text
+    assert deleted_manual.json()["api_token_deleted"] is False
+    assert manual_target.is_file()
+    assert any(row["id"]==shared["id"] for row in client.get("/api/admin/tokens").json())
+    assert client.delete("/api/admin/agents/opencode").status_code==404
 
 
 def test_agent_adapter_rejects_a_model_without_required_protocol(client, tmp_path, monkeypatch):

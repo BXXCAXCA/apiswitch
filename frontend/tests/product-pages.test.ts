@@ -13,7 +13,7 @@ import AgentsV2View from '../src/views/AgentsV2View.vue'
 import SystemSettingsV2View from '../src/views/SystemSettingsV2View.vue'
 import CapabilityCheckboxGroup from '../src/components/CapabilityCheckboxGroup.vue'
 import { inputCapabilityOptions } from '../src/modelCapabilities'
-import { getJson, patchJson, postJson } from '../src/api/client'
+import { deleteJson, getJson, patchJson, postJson } from '../src/api/client'
 
 vi.mock('../src/api/client', () => ({
   getJson: vi.fn(async () => []),
@@ -304,6 +304,41 @@ describe('generation two product pages', () => {
     postMock.mockImplementation(async () => undefined as any)
   })
 
+  it('deletes a saved Agent configuration from the written configurations table', async () => {
+    const getMock = vi.mocked(getJson)
+    const deleteMock = vi.mocked(deleteJson)
+    let agentRows: any[] = [{
+      id: 7,
+      agent_type: 'opencode',
+      config_path: 'C:/Users/test/.config/opencode/opencode.json',
+      enabled: true,
+      model_ids: [3],
+      api_token_mode: 'auto',
+      api_token_prefix: 'ask_agent'
+    }]
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/unified-models') return [{ id: 3, name: 'agent-all', enabled: true, enabled_protocols: ['openai_chat'] }] as any
+      if (url === '/api/admin/agents') return agentRows as any
+      return [] as any
+    })
+    deleteMock.mockImplementation(async () => {
+      agentRows = []
+      return { deleted: true, api_token_deleted: true, config_file_preserved: true } as any
+    })
+
+    const wrapper = mountWithMessage(AgentsV2View)
+    await flushPromises()
+    expect(wrapper.text()).toContain('OpenCode')
+    await wrapper.find('[data-testid="agent-delete-opencode"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteMock).toHaveBeenCalledWith('/api/admin/agents/opencode')
+    expect(wrapper.text()).toContain('尚未写入 Agent 配置')
+    wrapper.unmount()
+    getMock.mockImplementation(async () => [] as any)
+    deleteMock.mockImplementation(async () => undefined as any)
+  })
+
   it('disables Combo strategy outside Combo mode and explains capability overrides', async () => {
     const wrapper = mountWithMessage(UnifiedModelsView)
     await flushPromises()
@@ -344,6 +379,31 @@ describe('generation two product pages', () => {
     expect(wrapper.text()).toContain('已选 1 个：长名称供应商 / 完整模型显示名称 · namespace/extremely-long-upstream-model-name-that-must-remain-visible (#8)')
     expect(wrapper.find('.model-preview').attributes('title')).toContain('namespace/extremely-long-upstream-model-name-that-must-remain-visible')
     wrapper.unmount()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
+  it('persists Windows startup immediately when the switch changes', async () => {
+    const getMock = vi.mocked(getJson)
+    const patchMock = vi.mocked(patchJson)
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/runtime') return { desktop: true } as any
+      if (url === '/api/admin/settings') return {} as any
+      if (url === '/api/admin/settings/startup') return { enabled: false, command: null } as any
+      return [] as any
+    })
+    patchMock.mockResolvedValueOnce({ enabled: true, command: 'APISwitch.exe --background' } as any)
+
+    const wrapper = mountWithMessage(SystemSettingsV2View)
+    await flushPromises()
+    const startupSwitch: any = wrapper.findComponent('[data-testid="startup-switch"]')
+    startupSwitch.vm.$emit('update:value', true)
+    await flushPromises()
+
+    expect(patchMock).toHaveBeenCalledWith('/api/admin/settings/startup', { enabled: true })
+    expect(startupSwitch.props('value')).toBe(true)
+    expect(wrapper.text()).toContain('关闭窗口会驻留系统托盘')
+    wrapper.unmount()
+    patchMock.mockClear()
     getMock.mockImplementation(async () => [] as any)
   })
 

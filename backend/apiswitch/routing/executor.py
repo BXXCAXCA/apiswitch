@@ -14,7 +14,7 @@ import time
 import uuid
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from sqlalchemy import select
@@ -352,6 +352,24 @@ def provider_headers(provider: ProviderInstance) -> dict[str, str]:
     return headers
 
 
+def _openai_endpoint_url(provider: ProviderInstance, base: str, endpoint_path: str) -> str:
+    """Build an OpenAI-compatible endpoint using the catalog path as a hint.
+
+    Manual/custom templates can declare ``/v1/models`` while the saved Base URL
+    contains only the origin.  In that configuration discovery previously used
+    ``/v1/models`` but inference incorrectly used ``/chat/completions``.  Reuse
+    the model-catalog prefix for every OpenAI-compatible endpoint, while avoiding
+    a duplicated prefix when the Base URL already ends in it.
+    """
+    template = get_template(provider.template_key) or {}
+    model_list_path = str(template.get("model_list_path") or "/models")
+    api_prefix = model_list_path[:-len("/models")] if model_list_path.endswith("/models") else ""
+    base_path = urlsplit(base).path.rstrip("/")
+    if api_prefix and not (base_path == api_prefix or base_path.endswith(api_prefix)):
+        return base + api_prefix + endpoint_path
+    return base + endpoint_path
+
+
 async def discover_models(provider: ProviderInstance) -> list[dict[str, Any]]:
     """Fetch and normalize a provider model catalog without exposing secrets."""
     if provider.base_url.startswith("mock://"):
@@ -364,7 +382,8 @@ async def discover_models(provider: ProviderInstance) -> list[dict[str, Any]]:
     if model_list_path == "":
         raise ProtocolError("model_discovery_unsupported","该供应商没有可可靠调用的模型目录，请手工添加上游模型","provider_test",{"template_key":provider.template_key})
     if protocol in {"openai","openai_compatible"}:
-        url=base+str(model_list_path or "/models")
+        path=str(model_list_path or "/models")
+        url=_openai_endpoint_url(provider,base,"/models") if path.endswith("/models") else base+path
     elif protocol=="anthropic_messages":
         url=base+str(model_list_path or ("/models" if base.endswith("/v1") else "/v1/models"))
     elif protocol=="gemini":
@@ -683,7 +702,7 @@ async def _call_http(candidate: RouteCandidate, request: CanonicalRequest) -> Ca
     try:proxy=secret_crypto.decrypt(provider.proxy_url_encrypted) if getattr(provider,"proxy_url_encrypted",None) else None
     except SecretCryptoError as exc:raise ProtocolError("credential_decryption_failed",str(exc),"upstream_credentials") from exc
     if protocol in {"openai","openai_compatible"}:
-        url=base+_openai_path(request.request_type, request.parameters.get("_apiswitch_operation")); payload=_openai_payload(request,model)
+        url=_openai_endpoint_url(provider,base,_openai_path(request.request_type, request.parameters.get("_apiswitch_operation"))); payload=_openai_payload(request,model)
         if provider.template_key == "sensenova" and request.request_type == "chat":
             # SenseNova compatible-mode v2 follows OpenAI's newer token field
             # and exposes slow-thinking through reasoning_effort.

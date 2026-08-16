@@ -813,17 +813,22 @@ def rotate_token(token_id:int,db:Session=Depends(get_db))->dict[str,Any]:
     return {"id":row.id,"token":plain,"prefix":prefix,"message":"旧 Token 已立即失效；请复制新 Token，明文不会再次显示"}
 
 
-@router.delete("/tokens/{token_id}")
-def delete_token(token_id:int,db:Session=Depends(get_db))->dict[str,bool]:
-    row=db.get(ApiToken,token_id)
-    if not row:raise HTTPException(404,"Token 不存在")
+def _delete_token_row(db:Session,row:ApiToken)->None:
+    token_id=row.id
     for log in db.scalars(select(RequestLog).where(RequestLog.api_token_id==token_id)).all():
         log.api_token_prefix_snapshot=log.api_token_prefix_snapshot or row.token_prefix;log.api_token_id=None
     for usage_row in db.scalars(select(UsageHistory).where(UsageHistory.api_token_id==token_id)).all():usage_row.api_token_id=None
     for agent in db.scalars(select(AgentConfig).where(AgentConfig.api_token_id==token_id)).all():
         agent.api_token_id=None;agent.api_token_mode="auto"
     db.query(ApiTokenUnifiedModel).filter(ApiTokenUnifiedModel.api_token_id==token_id).delete(synchronize_session=False)
-    db.delete(row);db.commit();return {"deleted":True}
+    db.delete(row)
+
+
+@router.delete("/tokens/{token_id}")
+def delete_token(token_id:int,db:Session=Depends(get_db))->dict[str,bool]:
+    row=db.get(ApiToken,token_id)
+    if not row:raise HTTPException(404,"Token 不存在")
+    _delete_token_row(db,row);db.commit();return {"deleted":True}
 
 
 @router.get("/router/status")
@@ -1027,6 +1032,31 @@ def agents(db:Session=Depends(get_db))->list[dict[str,Any]]:
             "last_written_base_url":agent.last_written_base_url,"last_backup_path":agent.last_backup_path,
         })
     return rows
+
+
+@router.delete("/agents/{agent_type}")
+def delete_agent(agent_type:str,db:Session=Depends(get_db))->dict[str,Any]:
+    row=_agent_row(db,agent_type)
+    if not row:raise HTTPException(404,"Agent 配置不存在")
+    token_id=row.api_token_id
+    remove_independent_token=(row.api_token_mode or "auto")=="auto" and token_id is not None
+    config_path=row.config_path
+    db.delete(row);db.flush()
+    token_deleted=False
+    if remove_independent_token:
+        still_referenced=db.scalar(select(AgentConfig.id).where(AgentConfig.api_token_id==token_id).limit(1))
+        token=db.get(ApiToken,token_id)
+        if still_referenced is None and token is not None:
+            _delete_token_row(db,token)
+            token_deleted=True
+    db.commit()
+    return {
+        "deleted":True,
+        "agent_type":agent_type,
+        "api_token_deleted":token_deleted,
+        "config_file_preserved":True,
+        "config_path":config_path,
+    }
 
 
 _AGENT_TOKEN_PATTERN=re.compile(r"ask_[A-Za-z0-9_-]{8,}")

@@ -14,6 +14,7 @@ from typing import Any
 from apiswitch.desktop import (
     _acquire_single_instance,
     _select_port,
+    _stop_backend_server,
     _wait_for_server,
     configure_desktop_environment,
 )
@@ -66,6 +67,7 @@ def run_smoke_test(report_path: Path) -> int:
                 host="127.0.0.1",
                 port=port,
                 log_level="warning",
+                timeout_graceful_shutdown=2,
             )
         )
         startup_error: list[BaseException] = []
@@ -124,10 +126,11 @@ def run_smoke_test(report_path: Path) -> int:
             }
         )
     finally:
-        if server is not None:
-            server.should_exit = True
-        if worker is not None:
-            worker.join(timeout=5)
+        if server is not None and worker is not None:
+            report["backend_stopped"] = _stop_backend_server(server, worker)
+            if not report["backend_stopped"]:
+                report["ok"] = False
+                report["error"] = "Packaged backend did not release its listener during shutdown"
         _write_report(report_path, report)
 
     return 0 if report["ok"] else 1

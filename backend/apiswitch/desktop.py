@@ -126,11 +126,24 @@ def _write_startup_command(command: str | None) -> None:
 
 
 def is_startup_enabled() -> bool:
-    return _read_startup_command() == _startup_command()
+    # Treat an existing APISwitch Run entry as enabled even when it points to a
+    # previous versioned executable.  The active executable repairs that stale
+    # command during startup.
+    return bool(_read_startup_command())
 
 
 def set_startup_enabled(enabled: bool) -> None:
     _write_startup_command(_startup_command() if enabled else None)
+
+
+def _repair_startup_command() -> bool:
+    """Update an enabled Run entry to the current executable after upgrades."""
+    registered = _read_startup_command()
+    current = _startup_command()
+    if not registered or registered == current:
+        return False
+    _write_startup_command(current)
+    return True
 
 
 class DesktopTray:
@@ -196,7 +209,17 @@ class DesktopTray:
     def on_closing(self) -> bool | None:
         if self.exiting:
             return None
-        threading.Thread(target=self.hide, name="apiswitch-hide-window", daemon=True).start()
+        # Closing the window keeps the gateway available in the tray.  The
+        # tray's explicit "退出" action sets ``exiting`` and performs the real
+        # backend shutdown, including listener release.
+        def hide_and_notify() -> None:
+            self.hide()
+            try:
+                self.icon.notify("APISwitch 已在后台运行；请从托盘菜单选择“退出”以停止网关", "APISwitch")
+            except Exception:  # pragma: no cover - shell notification availability varies
+                pass
+
+        threading.Thread(target=hide_and_notify, name="apiswitch-hide-window", daemon=True).start()
         return False
 
     def on_minimized(self) -> None:
@@ -387,10 +410,29 @@ def _wait_for_server(url: str, timeout_seconds: float = 15) -> None:
     raise RuntimeError("APISwitch desktop backend did not start within 15 seconds")
 
 
+def _stop_backend_server(server, worker: threading.Thread, graceful_timeout: float = 3, force_timeout: float = 2) -> bool:
+    """Stop Uvicorn and report whether its listener thread actually exited."""
+    server.should_exit = True
+    worker.join(timeout=graceful_timeout)
+    if worker.is_alive():
+        # Long-lived HTTP/WebSocket connections can outlive the first graceful
+        # wait.  Escalate so Uvicorn cancels them and releases the listening
+        # socket before the desktop process finishes.
+        server.force_exit = True
+        worker.join(timeout=force_timeout)
+    return not worker.is_alive()
+
+
 def run_desktop(*, start_hidden: bool = False) -> None:
     if not _acquire_single_instance():
         _request_existing_window()
         return
+    try:
+        _repair_startup_command()
+    except OSError:
+        # A stale or temporarily unwritable HKCU Run value must not prevent the
+        # desktop gateway from starting; the settings API can retry explicitly.
+        pass
     previous_base_url = str(runtime_info().get("base_url") or "")
     # A forced exit may leave runtime.json behind.  Once this process owns the
     # mutex, no other desktop host can legitimately own that marker.
@@ -405,7 +447,13 @@ def run_desktop(*, start_hidden: bool = False) -> None:
 
     port = _select_port(8080)
     url = f"http://127.0.0.1:{port}"
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    server = uvicorn.Server(uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+        timeout_graceful_shutdown=2,
+    ))
     startup_error: list[BaseException] = []
 
     def serve() -> None:
@@ -438,9 +486,12 @@ def run_desktop(*, start_hidden: bool = False) -> None:
             ipc_listener.close()
             tray.stop()
     finally:
-        server.should_exit = True
-        worker.join(timeout=5)
+        backend_stopped = _stop_backend_server(server, worker)
         _clear_runtime(os.getpid())
+        if not backend_stopped:
+            # A stuck server thread must never keep the desktop executable and
+            # its port alive after the user has explicitly closed the program.
+            os._exit(0)
 
 
 if __name__ == "__main__":

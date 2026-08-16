@@ -790,6 +790,77 @@ def test_provider_connection_test_and_remote_model_sync_use_http_catalog(client:
     assert all(request.headers["authorization"] == "Bearer unit-placeholder-credential" for request in requests)
 
 
+def test_manual_custom_openai_provider_reuses_v1_catalog_prefix_for_chat(client: TestClient, monkeypatch):
+    requests: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": [{"id": "glm-5.2"}]})
+        payload = json.loads(request.content)
+        return httpx.Response(200, json={
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {},
+            "model": payload["model"],
+        })
+
+    monkeypatch.setattr(executor, "HTTP_TRANSPORT", httpx.MockTransport(upstream))
+    provider = client.post("/api/admin/provider-instances", json={
+        "name": f"manual-custom-{uuid4().hex}",
+        "template_key": "manual_custom",
+        "protocol_type": "openai_compatible",
+        "base_url": "https://maas.example.invalid",
+        "api_key": "unit-placeholder-credential",
+    }).json()
+    discovered = client.post(f"/api/admin/provider-instances/{provider['id']}/upstream-models/discover")
+    assert discovered.status_code == 200, discovered.text
+    upstream_model = client.post(
+        f"/api/admin/provider-instances/{provider['id']}/upstream-models",
+        json={"model_id": "glm-5.2", "input_capabilities_json": ["text"], "output_capabilities_json": ["text"]},
+    ).json()
+    unified = client.post("/api/admin/unified-models", json={
+        "name": f"manual-custom-{uuid4().hex}", "enabled_protocols": ["openai_chat"],
+    }).json()
+    client.post(
+        f"/api/admin/unified-models/{unified['id']}/candidates",
+        json={"upstream_model_id": upstream_model["id"]},
+    )
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers=_token(client),
+        json={"model": unified["name"], "messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert [(request.method, request.url.path) for request in requests] == [
+        ("GET", "/v1/models"),
+        ("POST", "/v1/chat/completions"),
+    ]
+
+
+def test_manual_custom_openai_provider_does_not_duplicate_v1_prefix(client: TestClient, monkeypatch):
+    paths: list[str] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        paths.append(request.url.path)
+        return httpx.Response(200, json={"data": []})
+
+    monkeypatch.setattr(executor, "HTTP_TRANSPORT", httpx.MockTransport(upstream))
+    provider = client.post("/api/admin/provider-instances", json={
+        "name": f"manual-custom-v1-{uuid4().hex}",
+        "template_key": "manual_custom",
+        "protocol_type": "openai_compatible",
+        "base_url": "https://maas.example.invalid/v1",
+        "api_key": "unit-placeholder-credential",
+    }).json()
+
+    response = client.post(f"/api/admin/provider-instances/{provider['id']}/upstream-models/discover")
+
+    assert response.status_code == 200, response.text
+    assert paths == ["/v1/models"]
+
+
 def test_namespaced_model_id_is_preserved_and_legacy_basename_is_repaired(client: TestClient, monkeypatch):
     captured_chat_models = []
 
