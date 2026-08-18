@@ -175,6 +175,8 @@ class RequestLog(Base):
     combo_strategy: Mapped[str | None] = mapped_column(String(32), nullable=True)
     candidate_summary_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     auxiliary_summary_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    prompt_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    response_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     failure_stage: Mapped[str | None] = mapped_column(String(64), nullable=True)
     api_token_id: Mapped[int | None] = mapped_column(ForeignKey("api_tokens.id"), nullable=True)
     api_token_prefix_snapshot: Mapped[str | None] = mapped_column(String(32), nullable=True)

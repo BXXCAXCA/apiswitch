@@ -407,6 +407,34 @@ describe('generation two product pages', () => {
     getMock.mockImplementation(async () => [] as any)
   })
 
+  it('keeps full Prompt and Response logging off by default and lets settings enable it', async () => {
+    const getMock = vi.mocked(getJson)
+    const patchMock = vi.mocked(patchJson)
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/runtime') return { desktop: true } as any
+      if (url === '/api/admin/settings') return { save_full_prompt_response: false } as any
+      if (url === '/api/admin/settings/startup') return { enabled: false, command: null } as any
+      return [] as any
+    })
+    patchMock.mockResolvedValueOnce({ save_full_prompt_response: true } as any)
+
+    const wrapper = mountWithMessage(SystemSettingsV2View)
+    await flushPromises()
+    const contentSwitch: any = wrapper.findComponent('[data-testid="save-log-content-switch"]')
+    expect(contentSwitch.props('value')).toBe(false)
+    expect(wrapper.text()).toContain('默认关闭')
+    contentSwitch.vm.$emit('update:value', true)
+    await flushPromises()
+
+    expect(patchMock).toHaveBeenCalledWith('/api/admin/settings', { save_full_prompt_response: true })
+    expect(contentSwitch.props('value')).toBe(true)
+    expect(wrapper.text()).toContain('已开启完整内容保存')
+    expect(wrapper.text()).toContain('二进制响应仅记录类型和大小')
+    wrapper.unmount()
+    patchMock.mockClear()
+    getMock.mockImplementation(async () => [] as any)
+  })
+
   it('bulk-configures selected upstream models from one shared form', async () => {
     const getMock = vi.mocked(getJson)
     const postMock = vi.mocked(postJson)

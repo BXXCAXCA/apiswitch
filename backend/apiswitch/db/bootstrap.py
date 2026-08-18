@@ -82,6 +82,10 @@ def _ensure_generation_two_columns(path: Path | None) -> None:
             connection.execute("ALTER TABLE request_logs ADD COLUMN request_kind VARCHAR(32) NOT NULL DEFAULT 'main'")
         if columns and "parent_request_id" not in columns:
             connection.execute("ALTER TABLE request_logs ADD COLUMN parent_request_id VARCHAR(128)")
+        if columns and "prompt_json" not in columns:
+            connection.execute("ALTER TABLE request_logs ADD COLUMN prompt_json JSON")
+        if columns and "response_json" not in columns:
+            connection.execute("ALTER TABLE request_logs ADD COLUMN response_json JSON")
         if columns:
             connection.execute("CREATE INDEX IF NOT EXISTS ix_request_logs_request_kind ON request_logs(request_kind)")
             connection.execute("CREATE INDEX IF NOT EXISTS ix_request_logs_parent_request_id ON request_logs(parent_request_id)")
@@ -140,7 +144,7 @@ def init_database() -> None:
                 db.add(SchemaMetadata(generation=SCHEMA_GENERATION, app_version=__version__, reset_from_backup=reset_from_backup))
             if db.get(AuxiliarySettings, 1) is None:
                 db.add(AuxiliarySettings(id=1, mode="global_pool"))
-            defaults = {"preferred_port": 8080, "upload_limit_bytes": 20 * 1024 * 1024, "template_catalog_version": "2026.07"}
+            defaults = {"preferred_port": 8080, "upload_limit_bytes": 20 * 1024 * 1024, "template_catalog_version": "2026.07", "save_full_prompt_response": False}
             for key, value in defaults.items():
                 if db.get(SystemSetting, key) is None:
                     db.add(SystemSetting(key=key, value_json=value))

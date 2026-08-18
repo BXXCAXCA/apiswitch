@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from apiswitch.catalog.templates import get_template
 from apiswitch.db.base import utc_now
-from apiswitch.db.models import ApiToken, Budget, CircuitBreaker, ProviderHealth, ProviderInstance, RequestLog, UnifiedModel, UpstreamModel, UsageHistory
+from apiswitch.db.models import ApiToken, Budget, CircuitBreaker, ProviderHealth, ProviderInstance, RequestLog, SystemSetting, UnifiedModel, UpstreamModel, UsageHistory
 from apiswitch.protocols.canonical import CanonicalRequest, CanonicalResponse, ProtocolError
 from apiswitch.routing.engine import RouteCandidate, plan_auxiliary, remember_session_candidate, route_candidates
 from apiswitch.routing.capabilities import infer_model_characteristics
@@ -39,6 +39,24 @@ AUXILIARY_CACHE_MAX_ENTRIES = 256
 _auxiliary_cache:dict[str,tuple[float,CanonicalResponse,str]]={}
 _auxiliary_inflight:dict[tuple[int,str],tuple[asyncio.Task[CanonicalResponse],str]]={}
 _auxiliary_runtime_lock=threading.Lock()
+
+
+def _save_full_prompt_response(db:Session)->bool:
+    row=db.get(SystemSetting,"save_full_prompt_response")
+    return bool(row and row.value_json is True)
+
+
+def _log_json_value(value:Any)->Any:
+    """Make opted-in log content JSON-safe without persisting binary bodies."""
+    if isinstance(value,bytes):return {"binary_omitted":True,"size_bytes":len(value)}
+    if isinstance(value,dict):return {str(key):_log_json_value(item) for key,item in value.items()}
+    if isinstance(value,(list,tuple)):return [_log_json_value(item) for item in value]
+    if value is None or isinstance(value,(str,int,float,bool)):return value
+    return str(value)
+
+
+def _error_log_response(error:ProtocolError)->dict[str,Any]:
+    return {"error":{"type":error.error_type,"message":str(error),"stage":error.stage,"details":_log_json_value(error.details)}}
 
 
 def _canonical_tools(request:CanonicalRequest)->list[dict[str,Any]]:
@@ -829,6 +847,7 @@ def _record_auxiliary_log(
     cost=(input_tokens*(upstream.input_price or 0)+output_tokens*(upstream.output_price or 0))/1_000_000
     step.update({"request_id":request_id,"parent_request_id":parent_request_id,"latency_ms":latency_ms,"input_tokens":input_tokens,"output_tokens":output_tokens,"estimated_cost":cost})
     summary={key:step.get(key) for key in ("workflow_id","workflow_type","step_index","attempt_index","input","output","status","parent_request_id","cache_status","shared_request_id")}
+    save_content=_save_full_prompt_response(db)
     db.add(RequestLog(
         request_id=request_id,request_kind="auxiliary",parent_request_id=parent_request_id,
         started_at=started,finished_at=utc_now(),inbound_protocol="auxiliary",
@@ -837,6 +856,8 @@ def _record_auxiliary_log(
         input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,latency_ms=latency_ms,
         first_token_latency_ms=latency_ms,success=error is None,error_type=error.error_type if error else None,
         error_message=str(error) if error else None,failure_stage=error.stage if error else None,
+        prompt_json=_log_json_value(request.dump()) if save_content else None,
+        response_json=_log_json_value(result.dump()) if save_content and result is not None else (_error_log_response(error) if save_content and error else None),
     ))
     if error is None:
         db.add(UsageHistory(
@@ -1157,6 +1178,7 @@ def _apply_exceeded_budget_actions(rows:list[Budget],candidates:list[RouteCandid
 async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|None=None)->tuple[dict[str,Any],CanonicalResponse]:
     request_id=f"req_{uuid.uuid4().hex}";started=utc_now();clock=time.perf_counter();selected:RouteCandidate|None=None;explanation=[];auxiliary={};unified=None;first_token_latency_ms:float|None=None
     token_row=db.get(ApiToken,api_token_id) if api_token_id else None;token_prefix_snapshot=token_row.token_prefix if token_row else None
+    save_content=_save_full_prompt_response(db);prompt_json=_log_json_value(request.dump()) if save_content else None
     try:
         unified,candidates,explanation=route_candidates(db,request)
         preflight=_exceeded(_budgets(db,request,unified,api_token_id))
@@ -1187,9 +1209,9 @@ async def execute_request(db:Session,request:CanonicalRequest,api_token_id:int|N
         accumulate_budget_spend(db,estimated_cost=cost,api_token_id=api_token_id,provider_id=selected.provider.id,upstream_model_id=selected.upstream.id,unified_model=request.unified_model,unified_model_id=unified.id)
         remember_session_candidate(unified,request,selected.candidate.id)
         latency_ms=(time.perf_counter()-clock)*1000
-        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,combo_strategy=unified.combo_strategy,candidate_summary_json=explanation,auxiliary_summary_json=auxiliary,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,success=True,latency_ms=latency_ms,first_token_latency_ms=first_token_latency_ms))
+        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,combo_strategy=unified.combo_strategy,candidate_summary_json=explanation,auxiliary_summary_json=auxiliary,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost,success=True,latency_ms=latency_ms,first_token_latency_ms=first_token_latency_ms,prompt_json=prompt_json,response_json=_log_json_value(response.dump()) if save_content else None))
         db.add(UsageHistory(request_id=request_id,api_token_id=api_token_id,provider_instance_id=selected.provider.id,upstream_model_id=selected.upstream.id,unified_model=request.unified_model,inbound_protocol=request.inbound_protocol,input_tokens=input_tokens,output_tokens=output_tokens,estimated_cost=cost));db.commit()
         return {"request_id":request_id,"selected":selected,"auxiliary":auxiliary,"explanation":explanation},response
     except ProtocolError as exc:
         failure_candidates=explanation or (exc.details.get("candidates") if isinstance(exc.details,dict) else None)
-        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id if selected else None,upstream_model_id=selected.upstream.id if selected else None,combo_strategy=unified.combo_strategy if unified else None,candidate_summary_json=failure_candidates or None,auxiliary_summary_json=auxiliary or None,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,success=False,error_type=exc.error_type,error_message=str(exc),failure_stage=exc.stage,latency_ms=(time.perf_counter()-clock)*1000));db.commit();raise
+        db.add(RequestLog(request_id=request_id,started_at=started,finished_at=utc_now(),inbound_protocol=request.inbound_protocol,unified_model=request.unified_model,provider_instance_id=selected.provider.id if selected else None,upstream_model_id=selected.upstream.id if selected else None,combo_strategy=unified.combo_strategy if unified else None,candidate_summary_json=failure_candidates or None,auxiliary_summary_json=auxiliary or None,api_token_id=api_token_id,api_token_prefix_snapshot=token_prefix_snapshot,success=False,error_type=exc.error_type,error_message=str(exc),failure_stage=exc.stage,latency_ms=(time.perf_counter()-clock)*1000,prompt_json=prompt_json,response_json=_error_log_response(exc) if save_content else None));db.commit();raise

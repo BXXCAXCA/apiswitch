@@ -865,7 +865,7 @@ def logs(success:bool|None=Query(default=None),unified_model:str|None=None,upstr
     provider_names=dict(db.execute(select(ProviderInstance.id,ProviderInstance.name).where(ProviderInstance.id.in_(provider_ids))).all()) if provider_ids else {}
     upstream_names=dict(db.execute(select(UpstreamModel.id,UpstreamModel.model_id).where(UpstreamModel.id.in_(upstream_ids))).all()) if upstream_ids else {}
     token_names=dict(db.execute(select(ApiToken.id,ApiToken.name).where(ApiToken.id.in_(token_ids))).all()) if token_ids else {}
-    return [{"request_id":r.request_id,"request_kind":r.request_kind or "main","parent_request_id":r.parent_request_id,"started_at":r.started_at,"finished_at":r.finished_at,"inbound_protocol":r.inbound_protocol,"unified_model":r.unified_model,"provider_instance_id":r.provider_instance_id,"provider_name":provider_names.get(r.provider_instance_id),"upstream_model_id":r.upstream_model_id,"upstream_model_name":upstream_names.get(r.upstream_model_id),"api_token_id":r.api_token_id,"api_token_name":token_names.get(r.api_token_id),"api_token_prefix":r.api_token_prefix_snapshot,"success":r.success,"error_type":r.error_type,"error_message":r.error_message,"failure_stage":r.failure_stage,"candidate_summary":r.candidate_summary_json,"auxiliary_summary":r.auxiliary_summary_json,"input_tokens":r.input_tokens,"output_tokens":r.output_tokens,"estimated_cost":r.estimated_cost,"latency_ms":r.latency_ms,"first_token_latency_ms":r.first_token_latency_ms} for r in rows]
+    return [{"request_id":r.request_id,"request_kind":r.request_kind or "main","parent_request_id":r.parent_request_id,"started_at":r.started_at,"finished_at":r.finished_at,"inbound_protocol":r.inbound_protocol,"unified_model":r.unified_model,"provider_instance_id":r.provider_instance_id,"provider_name":provider_names.get(r.provider_instance_id),"upstream_model_id":r.upstream_model_id,"upstream_model_name":upstream_names.get(r.upstream_model_id),"api_token_id":r.api_token_id,"api_token_name":token_names.get(r.api_token_id),"api_token_prefix":r.api_token_prefix_snapshot,"success":r.success,"error_type":r.error_type,"error_message":r.error_message,"failure_stage":r.failure_stage,"candidate_summary":r.candidate_summary_json,"auxiliary_summary":r.auxiliary_summary_json,"prompt":r.prompt_json,"response":r.response_json,"input_tokens":r.input_tokens,"output_tokens":r.output_tokens,"estimated_cost":r.estimated_cost,"latency_ms":r.latency_ms,"first_token_latency_ms":r.first_token_latency_ms} for r in rows]
 
 
 @router.get("/accounting/pricing")
@@ -954,6 +954,7 @@ def delete_budget(budget_id:int,db:Session=Depends(get_db))->dict[str,bool]:
 def get_settings(db:Session=Depends(get_db))->dict[str,Any]:
     values={row.key:row.value_json for row in db.scalars(select(SystemSetting)).all()}
     values.setdefault("gateway_enabled",True)
+    values.setdefault("save_full_prompt_response",False)
     return values
 
 
@@ -961,6 +962,8 @@ def get_settings(db:Session=Depends(get_db))->dict[str,Any]:
 def update_settings(payload:dict[str,Any]=Body(...),db:Session=Depends(get_db))->dict[str,Any]:
     if "gateway_enabled" in payload and not isinstance(payload["gateway_enabled"],bool):
         raise _error("validation_error","gateway_enabled 必须是布尔值","system_settings")
+    if "save_full_prompt_response" in payload and not isinstance(payload["save_full_prompt_response"],bool):
+        raise _error("validation_error","save_full_prompt_response 必须是布尔值","system_settings")
     if "preferred_port" in payload:
         value=payload["preferred_port"]
         if isinstance(value,bool) or not isinstance(value,int) or not 1<=value<=65535:

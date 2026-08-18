@@ -58,7 +58,7 @@ def test_generation_two_database_gets_safe_additive_log_column(monkeypatch, tmp_
         connection.execute("INSERT INTO schema_metadata (generation, app_version, created_at) VALUES (2, 'test', CURRENT_TIMESTAMP)")
         connection.execute("ALTER TABLE request_logs RENAME TO request_logs_new")
         columns = connection.execute("PRAGMA table_info(request_logs_new)").fetchall()
-        kept = [row for row in columns if row[1] not in {"first_token_latency_ms", "request_kind", "parent_request_id"}]
+        kept = [row for row in columns if row[1] not in {"first_token_latency_ms", "request_kind", "parent_request_id", "prompt_json", "response_json"}]
         definitions = ", ".join(f'"{row[1]}" {row[2]}' for row in kept)
         connection.execute(f"CREATE TABLE request_logs ({definitions})")
         connection.execute("DROP TABLE request_logs_new")
@@ -68,7 +68,7 @@ def test_generation_two_database_gets_safe_additive_log_column(monkeypatch, tmp_
 
     with closing(sqlite3.connect(database)) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(request_logs)")}
-    assert {"first_token_latency_ms", "request_kind", "parent_request_id"}.issubset(columns)
+    assert {"first_token_latency_ms", "request_kind", "parent_request_id", "prompt_json", "response_json"}.issubset(columns)
 
 
 def test_generation_two_budget_rows_gain_period_and_request_count_columns(monkeypatch, tmp_path: Path):

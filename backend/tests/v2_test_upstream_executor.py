@@ -12,6 +12,13 @@ from apiswitch.db.session import SessionLocal
 from apiswitch.routing import executor
 
 
+def test_opted_in_log_content_replaces_binary_bodies_with_metadata():
+    assert executor._log_json_value({"body": b"abc", "nested": [b"de"]}) == {
+        "body": {"binary_omitted": True, "size_bytes": 3},
+        "nested": [{"binary_omitted": True, "size_bytes": 2}],
+    }
+
+
 def _provider(client: TestClient, base_url: str) -> int:
     response = client.post("/api/admin/provider-instances", json={
         "name": f"simulated-http-{uuid4().hex}", "template_key": "openai", "base_url": base_url,
@@ -58,6 +65,7 @@ def test_openai_compatible_http_upstream_is_called_and_normalized(client: TestCl
     assert log["success"] is True and log["upstream_model_id"] == upstream_model["id"]
     assert log["provider_name"].startswith("simulated-http-")
     assert log["upstream_model_name"] == "remote-chat"
+    assert log["prompt"] is None and log["response"] is None
     filtered = client.get("/api/admin/logs", params={
         "provider_instance_id": provider_id, "upstream_model_id": upstream_model["id"],
         "inbound_protocol": "openai_chat", "unified_model": unified["name"],
@@ -65,6 +73,15 @@ def test_openai_compatible_http_upstream_is_called_and_normalized(client: TestCl
     })
     assert filtered.status_code == 200 and [item["request_id"] for item in filtered.json()] == [log["request_id"]]
     assert client.get("/api/admin/logs", params={"min_cost": 0.1}).json() == []
+
+    settings = client.patch("/api/admin/settings", json={"save_full_prompt_response": True})
+    assert settings.status_code == 200 and settings.json()["save_full_prompt_response"] is True
+    saved_response = client.post("/v1/chat/completions", headers=_token(client), json={"model": unified["name"], "messages": [{"role": "user", "content": "save this prompt"}]})
+    assert saved_response.status_code == 200
+    saved_log = client.get("/api/admin/logs").json()[0]
+    assert saved_log["prompt"]["messages"][0]["content"] == "save this prompt"
+    assert saved_log["response"]["text"] == "simulated upstream reply"
+    assert saved_log["response"]["raw"]["choices"][0]["message"]["content"] == "simulated upstream reply"
 
 
 def test_terminal_protocols_use_their_real_http_paths_and_native_multipart(client: TestClient, monkeypatch):

@@ -4,7 +4,7 @@
       <n-h1>调用日志</n-h1>
       <n-button :loading="loading" @click="refresh">刷新</n-button>
     </n-space>
-    <n-alert type="info">默认不保存完整 Prompt/Response。主调用与每个辅助步骤分别记录，并通过父请求 ID 关联。</n-alert>
+    <n-alert type="info">默认不保存完整 Prompt/Response；可在“系统设置 → 日志隐私”中开启。主调用与每个辅助步骤分别记录，并通过父请求 ID 关联。</n-alert>
     <div data-testid="log-card-stack" class="log-card-stack">
       <n-card title="筛选">
         <div class="filter-grid">

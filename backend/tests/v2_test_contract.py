@@ -186,6 +186,8 @@ def test_gateway_switch_blocks_protocols_but_keeps_admin_available(client: TestC
     initial = client.get("/api/admin/settings")
     assert initial.status_code == 200
     assert initial.json()["gateway_enabled"] is True
+    assert initial.json()["save_full_prompt_response"] is False
+    assert client.patch("/api/admin/settings", json={"save_full_prompt_response": "true"}).status_code == 422
 
     disabled = client.patch("/api/admin/settings", json={"gateway_enabled": False})
     assert disabled.status_code == 200
